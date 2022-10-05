@@ -6,7 +6,8 @@ import torch
 
 def get_options(args=None):
     parser = argparse.ArgumentParser(
-        description="Attention based model for solving the Travelling Salesman Problem with Reinforcement Learning"
+        description="Attention based model for solving \
+            the Travelling Salesman Problem with Reinforcement Learning"
     )
 
     # Data
@@ -100,7 +101,8 @@ def get_options(args=None):
         "--max_grad_norm",
         type=float,
         default=1.0,
-        help="Maximum L2 norm for gradient clipping, default 1.0 (0 to disable clipping)",
+        help="Maximum L2 norm for gradient clipping, \
+            default 1.0 (0 to disable clipping)",
     )
     parser.add_argument("--no_cuda", action="store_true", help="Disable CUDA")
     parser.add_argument(
@@ -112,7 +114,8 @@ def get_options(args=None):
     parser.add_argument(
         "--baseline",
         default=None,
-        help="Baseline to use: 'rollout', 'critic' or 'exponential'. Defaults to no baseline.",
+        help="Baseline to use: 'rollout', 'critic' or 'exponential'. \
+            Defaults to no baseline.",
     )
     parser.add_argument(
         "--bl_alpha",
@@ -124,7 +127,8 @@ def get_options(args=None):
         "--bl_warmup_epochs",
         type=int,
         default=None,
-        help="Number of epochs to warmup the baseline, default None means 1 for rollout (exponential "
+        help="Number of epochs to warmup the baseline, \
+            default None means 1 for rollout (exponential "
         "used for warmup phase), 0 otherwise. Can only be used with rollout baseline.",
     )
     parser.add_argument(
@@ -142,14 +146,22 @@ def get_options(args=None):
         "--shrink_size",
         type=int,
         default=None,
-        help="Shrink the batch size if at least this many instances in the batch are finished"
+        help="Shrink the batch size if at least this many instances \
+            in the batch are finished"
         " to save memory (default None means no shrinking)",
     )
     parser.add_argument(
         "--data_distribution",
         type=str,
         default=None,
-        help="Data distribution to use during training, defaults and options depend on problem.",
+        help="Data distribution to use during training, \
+            defaults and options depend on problem.",
+    )
+    parser.add_argument(
+        "--buffer_size",
+        type=int,
+        default=12000,
+        help="Buffer size for RCRL.",
     )
 
     # Misc

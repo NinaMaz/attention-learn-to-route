@@ -56,6 +56,8 @@ class AttentionModel(nn.Module):
         n_heads=8,
         checkpoint_encoder=False,
         shrink_size=None,
+        buffer=None,
+        graph_size=None,
     ):
         super(AttentionModel, self).__init__()
 
@@ -79,6 +81,8 @@ class AttentionModel(nn.Module):
         self.n_heads = n_heads
         self.checkpoint_encoder = checkpoint_encoder
         self.shrink_size = shrink_size
+
+        self.buffer = buffer
 
         # Problem specific context parameters (placeholder and step context dimension)
         if self.is_abscvrp or self.is_vrp or self.is_orienteering or self.is_pctsp:
@@ -125,10 +129,18 @@ class AttentionModel(nn.Module):
             self.init_embed = nn.Linear(node_dim, embedding_dim)
 
         Encoder = GraphAttentionEncoder
+        Encoder_act = GraphAttentionEncoder
         if self.is_abscvrp:
             Encoder = EdgeWeightedGraphEncoder
 
         self.embedder = Encoder(
+            n_heads=n_heads,
+            embed_dim=embedding_dim,
+            n_layers=self.n_encode_layers,
+            normalization=normalization,
+        )
+
+        self.embedder_act = Encoder_act(
             n_heads=n_heads,
             embed_dim=embedding_dim,
             n_layers=self.n_encode_layers,
@@ -148,6 +160,14 @@ class AttentionModel(nn.Module):
         # Note n_heads * val_dim == embedding_dim so input to project_out is
         #  `embedding_dim`
         self.project_out = nn.Linear(embedding_dim, embedding_dim, bias=False)
+
+        self.discriminator = nn.Sequential(
+            nn.Linear(embedding_dim * graph_size, embedding_dim * graph_size),
+            nn.ReLU(),
+            # TODO: ??? nn.Dropout(0.3),
+            nn.Linear(embedding_dim * graph_size, 1),
+            nn.Sigmoid(),
+        )
 
     def set_decode_type(self, decode_type, temp=None):
         self.decode_type = decode_type
@@ -174,14 +194,52 @@ class AttentionModel(nn.Module):
         _log_p, pi = self._inner(input, embeddings)
 
         cost, mask = self.problem.get_costs(input, pi)
+
+        #         ##GET pi encoding - action encoding
+        pi_coord = torch.cat(
+            [inp[ind, :].unsqueeze(0) for inp, ind in zip(input, pi)], dim=0
+        )
+        embeddings_act, _ = self.embedder_act(self._init_embed(pi_coord))
+
+        #         ##PUT embeddings, pi, cost to buffer
+        for i in range(input.shape[0]):
+            self.buffer.add(
+                embeddings[i, ...].detach(),
+                embeddings_act[i, ...].detach(),
+                cost[i].detach(),
+            )
+
+        # SAMPLE from buffer
+        # TODO: remove buffer sampling from evaluation phase
+        label_pred = torch.tensor([0.0], requires_grad=True)
+        label_true = torch.tensor([0.0], requires_grad=True)
+        if self.buffer.full:
+            embeddings_buffer, embeddings_act_buffer, costs_buffer = self.buffer.sample(
+                input.shape[0]
+            )
+            embeddings_buffer.requires_grad = True
+            embeddings_act_buffer.requires_grad = True
+            embeddings_sa = embeddings * embeddings_act
+            embeddings_sa_buffer = embeddings_buffer * embeddings_act_buffer
+
+            # INPUT both sampled and current state, action pair to a discriminator
+            label_pred = self.discriminator(
+                torch.cat((embeddings_sa, embeddings_sa_buffer), 0).flatten(-2, -1)
+            )
+
+            # GET bin - the true label (implement in buffer)
+            # NOTE: for more comlpicated segmentations,
+            # implement this in ReplayBuffer.get_bin
+            label_true = torch.eq(costs_buffer.squeeze(), cost).float().to(input)
+
         # Log likelyhood is calculated within the model since returning it per
         # action does not work well with DataParallel since sequences can be of
         # different lengths
         ll = self._calc_log_likelihood(_log_p, pi, mask)
         if return_pi:
-            return cost, ll, pi
+            return cost, ll, pi, label_pred, label_true
 
-        return cost, ll
+        return cost, ll, label_pred, label_true
 
     def beam_search(self, *args, **kwargs):
         return self.problem.beam_search(*args, **kwargs, model=self)

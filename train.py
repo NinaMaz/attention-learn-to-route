@@ -37,7 +37,7 @@ def rollout(model, dataset, opts):
 
     def eval_model_bat(bat):
         with torch.no_grad():
-            cost, _ = model(move_to(bat, opts.device))
+            cost, _, _, _ = model(move_to(bat, opts.device))
         return cost.data.cpu()
 
     return torch.cat(
@@ -54,11 +54,13 @@ def rollout(model, dataset, opts):
 
 def clip_grad_norms(param_groups, max_norm=math.inf):
     """
-    Clips the norms for all param groups to max_norm and returns gradient norms before clipping
+    Clips the norms for all param groups to max_norm
+    and returns gradient norms before clipping.
     :param optimizer:
     :param max_norm:
     :param gradient_norms_log:
-    :return: grad_norms, clipped_grad_norms: list with (clipped) gradient norms per group
+    :return: grad_norms, clipped_grad_norms: list with (clipped)
+    gradient norms per group
     """
     grad_norms = [
         torch.nn.utils.clip_grad_norm_(
@@ -165,14 +167,17 @@ def train_batch(
     bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
 
     # Evaluate model, get costs and log probabilities
-    cost, log_likelihood = model(x)
+    cost, log_likelihood, label_pred, label_true = model(x)
 
     # Evaluate baseline, get baseline loss if any (only for critic)
     bl_val, bl_loss = baseline.eval(x, cost) if bl_val is None else (bl_val, 0)
 
     # Calculate loss
     reinforce_loss = ((cost - bl_val) * log_likelihood).mean()
-    loss = reinforce_loss + bl_loss
+    rcrl_loss = 0.0
+    if label_true is not None:
+        rcrl_loss = torch.mean((label_pred - label_true) ** 2)
+    loss = reinforce_loss + bl_loss + rcrl_loss
 
     # Perform backward pass and optimization step
     optimizer.zero_grad()
