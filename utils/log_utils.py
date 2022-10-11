@@ -1,3 +1,35 @@
+import os
+import csv
+
+CSV_DATA_MISMATCH = "Row data length must match the file header length"
+
+
+def write_results_csv(file_name, headers_name, row_data, operation="a"):
+    if len(headers_name) != len(row_data):
+        raise ValueError(CSV_DATA_MISMATCH)
+    _write_data = list()
+
+    if not os.path.exists(file_name):
+        operation = "w"
+        _write_data.append(headers_name)
+
+    _write_data.append(row_data)
+
+    with open(file_name, operation) as f:
+        writer = csv.writer(f)
+        _ = [writer.writerow(i) for i in _write_data]
+
+
+def file_is_empty(path):
+    return os.stat(path).st_size == 0
+
+
+def save_to_file(path, dict_saver):
+    header = list(dict_saver.keys())
+    values = list(dict_saver.values())
+    write_results_csv(path, header, values)
+
+
 def log_values(
     cost,
     grad_norms,

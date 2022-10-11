@@ -6,6 +6,7 @@ from tqdm import tqdm
 from multiprocessing.dummy import Pool as ThreadPool
 from multiprocessing import Pool
 import torch.nn.functional as F
+from utils.replay_buffer import ReplayBuffer
 
 
 def load_problem(name):
@@ -105,6 +106,13 @@ def load_model(path, epoch=None):
     )
     assert model_class is not None, "Unknown model: {}".format(model_class)
 
+    buffer = ReplayBuffer(
+        12000,
+        (args["graph_size"], args["embedding_dim"]),
+        (args["graph_size"], args["embedding_dim"]),
+        "cpu",
+    )
+
     model = model_class(
         args["embedding_dim"],
         args["hidden_dim"],
@@ -116,6 +124,8 @@ def load_model(path, epoch=None):
         tanh_clipping=args["tanh_clipping"],
         checkpoint_encoder=args.get("checkpoint_encoder", False),
         shrink_size=args.get("shrink_size", None),
+        buffer=buffer,
+        graph_size=args["graph_size"],
     )
     # Overwrite model parameters by parameters to load
     load_data = torch_load_cpu(model_filename)

@@ -19,6 +19,7 @@ from reinforce_baselines import (
 from nets.attention_model import AttentionModel
 from nets.pointer_network import PointerNetwork, CriticNetworkLSTM
 from utils import torch_load_cpu, load_problem
+from utils.replay_buffer import ReplayBuffer
 
 __spec__ = None  # for tracing with pdb
 
@@ -64,7 +65,13 @@ def run(opts):
     if load_path is not None:
         print("  [*] Loading data from {}".format(load_path))
         load_data = torch_load_cpu(load_path)
-
+    buffer = ReplayBuffer(
+        opts.buffer_size,
+        (opts.graph_size, opts.embedding_dim),
+        (opts.graph_size, opts.embedding_dim),
+        opts.device,
+    )
+    print(torch.cuda.device_count())
     # Initialize model
     model_class = {
         "attention": AttentionModel,
@@ -82,6 +89,8 @@ def run(opts):
         tanh_clipping=opts.tanh_clipping,
         checkpoint_encoder=opts.checkpoint_encoder,
         shrink_size=opts.shrink_size,
+        buffer=buffer,
+        graph_size=opts.graph_size,
     ).to(opts.device)
 
     if opts.use_cuda and torch.cuda.device_count() > 1:

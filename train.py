@@ -8,7 +8,8 @@ from torch.utils.data import DataLoader
 from torch.nn import DataParallel
 
 from nets.attention_model import set_decode_type
-from utils.log_utils import log_values
+from utils.log_utils import log_values, save_to_file
+from scipy import spatial
 from utils import move_to
 
 
@@ -37,7 +38,7 @@ def rollout(model, dataset, opts):
 
     def eval_model_bat(bat):
         with torch.no_grad():
-            cost, _ = model(move_to(bat, opts.device))
+            cost, *_ = model(move_to(bat, opts.device))
         return cost.data.cpu()
 
     return torch.cat(
@@ -54,11 +55,13 @@ def rollout(model, dataset, opts):
 
 def clip_grad_norms(param_groups, max_norm=math.inf):
     """
-    Clips the norms for all param groups to max_norm and returns gradient norms before clipping
+    Clips the norms for all param groups to max_norm
+    and returns gradient norms before clipping.
     :param optimizer:
     :param max_norm:
     :param gradient_norms_log:
-    :return: grad_norms, clipped_grad_norms: list with (clipped) gradient norms per group
+    :return: grad_norms, clipped_grad_norms: list with (clipped)
+    gradient norms per group
     """
     grad_norms = [
         torch.nn.utils.clip_grad_norm_(
@@ -165,14 +168,39 @@ def train_batch(
     bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
 
     # Evaluate model, get costs and log probabilities
-    cost, log_likelihood = model(x)
+    cost, log_likelihood, label_pred, label_true, emb_sa, emb_sa_b = model(x)
 
     # Evaluate baseline, get baseline loss if any (only for critic)
     bl_val, bl_loss = baseline.eval(x, cost) if bl_val is None else (bl_val, 0)
 
     # Calculate loss
     reinforce_loss = ((cost - bl_val) * log_likelihood).mean()
-    loss = reinforce_loss + bl_loss
+    rcrl_loss = 0.0
+    if opts.no_rcrl:
+        if label_true is not None:
+            rcrl_loss = torch.mean((label_pred - label_true) ** 2)
+            for i in ["pos", "neg"]:
+                if emb_sa is not None:
+                    if i == "pos":
+                        mask_l = label_true.view(label_true.shape[0], 1, 1).bool()
+                    else:
+                        mask_l = ~label_true.view(label_true.shape[0], 1, 1).bool()
+                    emb_sa_temp = emb_sa.masked_select(mask_l).cpu().detach().numpy()
+                    emb_sa_b_temp = (
+                        emb_sa_b.masked_select(mask_l).cpu().detach().numpy()
+                    )
+
+                    cos_sim = 1 - spatial.distance.cosine(emb_sa_temp, emb_sa_b_temp)
+
+                    save_to_file(
+                        "rcrl_cos_sim_"
+                        + i
+                        + "_"
+                        + opts.run_name.split("_")[-1]
+                        + ".csv",
+                        {"cos_sim": cos_sim},
+                    )
+    loss = reinforce_loss + bl_loss + rcrl_loss
 
     # Perform backward pass and optimization step
     optimizer.zero_grad()

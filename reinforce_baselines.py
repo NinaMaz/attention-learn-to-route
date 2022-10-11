@@ -1,4 +1,5 @@
 import torch
+import pickle
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 from scipy.stats import ttest_rel
@@ -68,7 +69,8 @@ class WarmupBaseline(Baseline):
         )
 
     def epoch_callback(self, model, epoch):
-        # Need to call epoch callback of inner model (also after first epoch if we have not used it)
+        # Need to call epoch callback of inner model
+        # (also after first epoch if we have not used it)
         self.baseline.epoch_callback(model, epoch)
         self.alpha = (epoch + 1) / float(self.n_epochs)
         if epoch < self.n_epochs:
@@ -149,20 +151,25 @@ class RolloutBaseline(Baseline):
         self._update_model(model, epoch)
 
     def _update_model(self, model, epoch, dataset=None):
-        self.model = copy.deepcopy(model)
-        # Always generate baseline dataset when updating model to prevent overfitting to the baseline dataset
+        # self.model = copy.deepcopy(model)
+        # TODO: copy.deepcopy bug with my model
+        self.model = pickle.loads(pickle.dumps(model))
+        # Always generate baseline dataset when updating model
+        # to prevent overfitting to the baseline dataset
 
         if dataset is not None:
             if len(dataset) != self.opts.val_size:
                 print(
-                    "Warning: not using saved baseline dataset since val_size does not match"
+                    "Warning: not using saved baseline dataset \
+                        since val_size does not match"
                 )
                 dataset = None
             elif (dataset[0] if self.problem.NAME == "tsp" else dataset[0]["loc"]).size(
                 0
             ) != self.opts.graph_size:
                 print(
-                    "Warning: not using saved baseline dataset since graph_size does not match"
+                    "Warning: not using saved baseline dataset \
+                        since graph_size does not match"
                 )
                 dataset = None
 
@@ -193,7 +200,8 @@ class RolloutBaseline(Baseline):
         )  # Flatten result to undo wrapping as 2D
 
     def eval(self, x, c):
-        # Use volatile mode for efficient inference (single batch so we do not use rollout function)
+        # Use volatile mode for efficient inference
+        # (single batch so we do not use rollout function)
         with torch.no_grad():
             v, _ = self.model(x)
 
@@ -202,7 +210,8 @@ class RolloutBaseline(Baseline):
 
     def epoch_callback(self, model, epoch):
         """
-        Challenges the current baseline with the model and replaces the baseline model if it is improved.
+        Challenges the current baseline with the model
+        and replaces the baseline model if it is improved.
         :param model: The model to challenge the baseline by
         :param epoch: The current epoch
         """
@@ -212,7 +221,8 @@ class RolloutBaseline(Baseline):
         candidate_mean = candidate_vals.mean()
 
         print(
-            "Epoch {} candidate mean {}, baseline epoch {} mean {}, difference {}".format(
+            "Epoch {} candidate mean {}, \
+                baseline epoch {} mean {}, difference {}".format(
                 epoch, candidate_mean, self.epoch, self.mean, candidate_mean - self.mean
             )
         )
