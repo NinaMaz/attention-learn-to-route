@@ -161,13 +161,7 @@ class AttentionModel(nn.Module):
         #  `embedding_dim`
         self.project_out = nn.Linear(embedding_dim, embedding_dim, bias=False)
 
-        self.discriminator = nn.Sequential(
-            nn.Linear(embedding_dim * graph_size, embedding_dim * graph_size),
-            nn.ReLU(),
-            # TODO: ??? nn.Dropout(0.3),
-            nn.Linear(embedding_dim * graph_size, 1),
-            nn.Sigmoid(),
-        )
+        self.discriminator = nn.CosineSimilarity(dim=1)
 
     def set_decode_type(self, decode_type, temp=None):
         self.decode_type = decode_type
@@ -224,7 +218,7 @@ class AttentionModel(nn.Module):
 
             # INPUT both sampled and current state, action pair to a discriminator
             label_pred = self.discriminator(
-                torch.cat((embeddings_sa, embeddings_sa_buffer), 0).flatten(-2, -1)
+                embeddings_sa.flatten(-2, -1), embeddings_sa_buffer.flatten(-2, -1)
             )
 
             # GET bin - the true label (implement in buffer)
