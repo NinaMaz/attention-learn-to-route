@@ -56,6 +56,7 @@ class AttentionModel(nn.Module):
         n_heads=8,
         checkpoint_encoder=False,
         shrink_size=None,
+        graph_size=None,
     ):
         super(AttentionModel, self).__init__()
 
@@ -80,6 +81,8 @@ class AttentionModel(nn.Module):
         self.checkpoint_encoder = checkpoint_encoder
         self.shrink_size = shrink_size
 
+        self.graph_size = graph_size
+
         # Problem specific context parameters (placeholder and step context dimension)
         if self.is_abscvrp or self.is_vrp or self.is_orienteering or self.is_pctsp:
             # Embedding of last node + remaining_capacity, remaining length, or
@@ -87,12 +90,12 @@ class AttentionModel(nn.Module):
             step_context_dim = embedding_dim + 1
 
             if self.is_pctsp:
-                node_dim = 4  # x, y, expected_prize, penalty
+                self.node_dim = 4  # x, y, expected_prize, penalty
             elif not self.is_abscvrp:
-                node_dim = 3  # x, y, demand / prize
+                self.node_dim = 3  # x, y, demand / prize
 
             else:
-                node_dim = 1  # demand / prize
+                self.node_dim = 1  # demand / prize
 
             # Special embedding projection for depot node
             self.init_embed_depot = nn.Linear(2, embedding_dim)
@@ -104,7 +107,7 @@ class AttentionModel(nn.Module):
         else:  # TSP
             assert problem.NAME == "tsp", "Unsupported problem: {}".format(problem.NAME)
             step_context_dim = 2 * embedding_dim  # Embedding of first and last node
-            node_dim = 2  # x, y
+            self.node_dim = 2  # x, y
 
             # Learned input symbols for first action
             self.W_placeholder = nn.Parameter(torch.Tensor(2 * embedding_dim))
@@ -116,14 +119,18 @@ class AttentionModel(nn.Module):
             # we've got two types of nodes: depots and clients
             self.node_type_embedding = nn.Embedding(2, embedding_dim)
             self.init_embed = nn.Sequential(
-                nn.Linear(node_dim, 2 * embedding_dim, bias=True),
+                nn.Linear(self.node_dim, 2 * embedding_dim, bias=True),
                 nn.ReLU(),
                 nn.Linear(2 * embedding_dim, embedding_dim, bias=True),
             )
 
         else:
-            self.init_embed = nn.Linear(node_dim, embedding_dim)
-
+            self.init_embed = nn.Linear(self.node_dim, embedding_dim)
+        self.decoder_out = nn.Sequential(
+            nn.Linear(embedding_dim * graph_size, 2 * embedding_dim),
+            nn.ReLU(),
+            nn.Linear(2 * embedding_dim, graph_size * self.node_dim),
+        )
         Encoder = GraphAttentionEncoder
         if self.is_abscvrp:
             Encoder = EdgeWeightedGraphEncoder
@@ -173,6 +180,10 @@ class AttentionModel(nn.Module):
 
         _log_p, pi = self._inner(input, embeddings)
 
+        input_reconstr = self.decoder_out(embeddings.flatten(-2, -1)).view(
+            -1, self.graph_size, self.node_dim
+        )
+
         cost, mask = self.problem.get_costs(input, pi)
         # Log likelyhood is calculated within the model since returning it per
         # action does not work well with DataParallel since sequences can be of
@@ -181,7 +192,7 @@ class AttentionModel(nn.Module):
         if return_pi:
             return cost, ll, pi
 
-        return cost, ll
+        return cost, ll, input_reconstr
 
     def beam_search(self, *args, **kwargs):
         return self.problem.beam_search(*args, **kwargs, model=self)

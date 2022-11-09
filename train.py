@@ -37,7 +37,7 @@ def rollout(model, dataset, opts):
 
     def eval_model_bat(bat):
         with torch.no_grad():
-            cost, _ = model(move_to(bat, opts.device))
+            cost, _, _ = model(move_to(bat, opts.device))
         return cost.data.cpu()
 
     return torch.cat(
@@ -165,14 +165,15 @@ def train_batch(
     bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
 
     # Evaluate model, get costs and log probabilities
-    cost, log_likelihood = model(x)
+    cost, log_likelihood, reconstr = model(x)
 
     # Evaluate baseline, get baseline loss if any (only for critic)
     bl_val, bl_loss = baseline.eval(x, cost) if bl_val is None else (bl_val, 0)
 
     # Calculate loss
     reinforce_loss = ((cost - bl_val) * log_likelihood).mean()
-    loss = reinforce_loss + bl_loss
+    reconstruction_loss = torch.nn.HuberLoss()
+    loss = reinforce_loss + bl_loss + reconstruction_loss(x, reconstr)
 
     # Perform backward pass and optimization step
     optimizer.zero_grad()
