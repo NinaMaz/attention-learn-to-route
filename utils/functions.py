@@ -116,6 +116,7 @@ def load_model(path, epoch=None):
         tanh_clipping=args["tanh_clipping"],
         checkpoint_encoder=args.get("checkpoint_encoder", False),
         shrink_size=args.get("shrink_size", None),
+        graph_size=args["graph_size"],
     )
     # Overwrite model parameters by parameters to load
     load_data = torch_load_cpu(model_filename)
