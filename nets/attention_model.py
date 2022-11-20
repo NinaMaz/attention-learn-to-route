@@ -230,7 +230,9 @@ class AttentionModel(nn.Module):
             # GET bin - the true label (implement in buffer)
             # NOTE: for more comlpicated segmentations,
             # implement this in ReplayBuffer.get_bin
-            label_true = torch.eq(costs_buffer.squeeze(), cost).float().to(input)
+            #label_true = torch.eq(costs_buffer.squeeze(), cost).float().to(input)
+            label_true = torch.le(torch.abs(costs_buffer.squeeze()-cost), torch.ones_like(cost)*0.5).float().to(input)
+            print(label_true)
 
         # Log likelyhood is calculated within the model since returning it per
         # action does not work well with DataParallel since sequences can be of
