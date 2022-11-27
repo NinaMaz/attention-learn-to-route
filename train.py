@@ -200,6 +200,7 @@ def train_batch(
             log_likelihood,
             reinforce_loss,
             bl_loss,
+            rcrl_loss,
             tb_logger,
             opts,
         )

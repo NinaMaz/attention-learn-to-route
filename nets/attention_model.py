@@ -28,8 +28,8 @@ class RCRLDiscriminator(nn.Module):
         # TODO: ??? nn.Dropout(0.3),
         self.lin_2 = nn.Linear(1024, 1)
         self.act_2 = nn.Sigmoid()
-        
-        
+
+
     def forward(self, input):
         input = self.conv_1(input)
         input = input.squeeze().flatten(-2,-1)
@@ -224,7 +224,7 @@ class AttentionModel(nn.Module):
                     embeddings_act[i, ...].detach(),
                     cost[i].detach(),
                 )
-             
+
 
             # SAMPLE from buffer
             # TODO: remove buffer sampling from evaluation phase
@@ -245,9 +245,9 @@ class AttentionModel(nn.Module):
                 # NOTE: for more comlpicated segmentations,
                 # implement this in ReplayBuffer.get_bin
                 #label_true = torch.eq(costs_buffer.squeeze(), cost).float().to(input)
-                
+
                 label_true = torch.le(torch.abs(costs_buffer.squeeze()-cost), torch.abs(cost)*0.125).float().to(input)
-                
+
 
             # Log likelihood is calculated within the model since returning it per
             # action does not work well with DataParallel since sequences can be of

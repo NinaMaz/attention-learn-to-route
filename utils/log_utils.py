@@ -10,6 +10,7 @@ def log_values(
     log_likelihood,
     reinforce_loss,
     bl_loss,
+    rcrl_loss,
     tb_logger,
     opts,
 ):
@@ -28,6 +29,7 @@ def log_values(
         {
             "avg_cost": avg_cost,
             "actor_loss": reinforce_loss.item(),
+            "rcrl_loss": rcrl_loss.item(),
             "nll": -log_likelihood.mean().item(),
             "grad_norm": grad_norms[0],
             "grad_norm_clipped": grad_norms_clipped[0],
