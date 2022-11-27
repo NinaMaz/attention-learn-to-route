@@ -17,6 +17,25 @@ def set_decode_type(model, decode_type):
         model = model.module
     model.set_decode_type(decode_type)
 
+class RCRLDiscriminator(nn.Module):
+    def __init__(self, embedding_dim, graph_size, kernel_size = 3):
+        super().__init__()
+        self.conv_1 = nn.Conv2d(2, 1, kernel_size)
+        conv_nodes_dim = graph_size - (kernel_size - 1)
+        conv_feat_dim = embedding_dim - (kernel_size - 1)
+        self.lin_1 = nn.Linear(conv_nodes_dim * conv_feat_dim, 1024)
+        self.act_1 = nn.ReLU()
+        # TODO: ??? nn.Dropout(0.3),
+        self.lin_2 = nn.Linear(1024, 1)
+        self.act_2 = nn.Sigmoid()
+        
+        
+    def forward(self, input):
+        input = self.conv_1(input)
+        input = input.squeeze().flatten(-2,-1)
+        input = self.act_1(self.lin_1(input))
+        input = self.act_2(self.lin_2(input))
+        return input
 
 class AttentionModelFixed(NamedTuple):
     """
@@ -161,13 +180,7 @@ class AttentionModel(nn.Module):
         #  `embedding_dim`
         self.project_out = nn.Linear(embedding_dim, embedding_dim, bias=False)
 
-        self.discriminator = nn.Sequential(
-            nn.Linear(embedding_dim * graph_size, embedding_dim * graph_size),
-            nn.ReLU(),
-            # TODO: ??? nn.Dropout(0.3),
-            nn.Linear(embedding_dim * graph_size, 1),
-            nn.Sigmoid(),
-        )
+        self.discriminator = RCRLDiscriminator(embedding_dim, graph_size)
 
     def set_decode_type(self, decode_type, temp=None):
         self.decode_type = decode_type
@@ -201,46 +214,47 @@ class AttentionModel(nn.Module):
         )
         embeddings_act, _ = self.embedder_act(self._init_embed(pi_coord))
 
-        #         ##PUT embeddings, pi, cost to buffer
-        for i in range(input.shape[0]):
-            self.buffer.add(
-                embeddings[i, ...].detach(),
-                embeddings_act[i, ...].detach(),
-                cost[i].detach(),
-            )
-
-        # SAMPLE from buffer
-        # TODO: remove buffer sampling from evaluation phase
+        #         ##PUT embeddings, pi, cost to buffer]
         label_pred = torch.tensor([0.0], requires_grad=True)
         label_true = torch.tensor([0.0], requires_grad=True)
-        if self.buffer.full:
-            embeddings_buffer, embeddings_act_buffer, costs_buffer = self.buffer.sample(
-                input.shape[0]
-            )
-            embeddings_buffer.requires_grad = True
-            embeddings_act_buffer.requires_grad = True
-            embeddings_sa = embeddings * embeddings_act
-            embeddings_sa_buffer = embeddings_buffer * embeddings_act_buffer
+        if self.training:
+            for i in range(input.shape[0]):
+                self.buffer.add(
+                    embeddings[i, ...].detach(),
+                    embeddings_act[i, ...].detach(),
+                    cost[i].detach(),
+                )
+             
 
-            # INPUT both sampled and current state, action pair to a discriminator
-            label_pred = self.discriminator(
-                torch.cat((embeddings_sa, embeddings_sa_buffer), 0).flatten(-2, -1)
-            )
+            # SAMPLE from buffer
+            # TODO: remove buffer sampling from evaluation phase
+            if self.buffer.full:
+                embeddings_buffer, embeddings_act_buffer, costs_buffer = self.buffer.sample(
+                    input.shape[0]
+                )
+                embeddings_buffer.requires_grad = True
+                embeddings_act_buffer.requires_grad = True
+                embeddings_sa = embeddings * embeddings_act
 
-            # GET bin - the true label (implement in buffer)
-            # NOTE: for more comlpicated segmentations,
-            # implement this in ReplayBuffer.get_bin
-            #label_true = torch.eq(costs_buffer.squeeze(), cost).float().to(input)
-            label_true = torch.le(torch.abs(costs_buffer.squeeze()-cost), torch.ones_like(cost)*0.5).float().to(input)
-            print(label_true)
+                embeddings_sa_buffer = embeddings_buffer * embeddings_act_buffer
+                # INPUT both sampled and current state, action pair to a discriminator
+                label_pred = self.discriminator(
+                    torch.stack((embeddings_sa, embeddings_sa_buffer), 1)
+                )
+                # GET bin - the true label (implement in buffer)
+                # NOTE: for more comlpicated segmentations,
+                # implement this in ReplayBuffer.get_bin
+                #label_true = torch.eq(costs_buffer.squeeze(), cost).float().to(input)
+                
+                label_true = torch.le(torch.abs(costs_buffer.squeeze()-cost), torch.abs(cost)*0.125).float().to(input)
+                
 
-        # Log likelyhood is calculated within the model since returning it per
-        # action does not work well with DataParallel since sequences can be of
-        # different lengths
+            # Log likelihood is calculated within the model since returning it per
+            # action does not work well with DataParallel since sequences can be of
+            # different lengths
         ll = self._calc_log_likelihood(_log_p, pi, mask)
         if return_pi:
             return cost, ll, pi, label_pred, label_true
-
         return cost, ll, label_pred, label_true
 
     def beam_search(self, *args, **kwargs):

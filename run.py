@@ -27,7 +27,7 @@ __spec__ = None  # for tracing with pdb
 
 def run(opts):
 
-    wandb.init(name='AM_RCRL', project='SbRLCO')
+    wandb.init(name="AM_RCRL", project="SbRLCO")
     # Pretty print the run args
     pp.pprint(vars(opts))
 
