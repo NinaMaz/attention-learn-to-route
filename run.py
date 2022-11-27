@@ -3,6 +3,7 @@
 import os
 import json
 import pprint as pp
+import wandb
 
 import torch
 import torch.optim as optim
@@ -26,6 +27,7 @@ __spec__ = None  # for tracing with pdb
 
 def run(opts):
 
+    wandb.init(name='AM_RCRL', project='SbRLCO')
     # Pretty print the run args
     pp.pprint(vars(opts))
 
@@ -99,7 +101,7 @@ def run(opts):
     # Overwrite model parameters by parameters to load
     model_ = get_inner_model(model)
     model_.load_state_dict({**model_.state_dict(), **load_data.get("model", {})})
-
+    wandb.watch(model)
     # Initialize baseline
     if opts.baseline == "exponential":
         baseline = ExponentialBaseline(opts.exp_beta)

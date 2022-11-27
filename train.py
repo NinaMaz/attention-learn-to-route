@@ -3,6 +3,7 @@ import time
 from tqdm import tqdm
 import torch
 import math
+import wandb
 
 from torch.utils.data import DataLoader
 from torch.nn import DataParallel
@@ -97,6 +98,7 @@ def train_epoch(
     step = epoch * (opts.epoch_size // opts.batch_size)
     start_time = time.time()
 
+    wandb.log({"learnrate_pg0":optimizer.param_groups[0]["lr"]}, step = step)
     if not opts.no_tensorboard:
         tb_logger.log_value("learnrate_pg0", optimizer.param_groups[0]["lr"], step)
 
@@ -150,6 +152,7 @@ def train_epoch(
 
     avg_reward = validate(model, val_dataset, opts)
 
+    wandb.log({"val_avg_reward":avg_reward}, step = step)
     if not opts.no_tensorboard:
         tb_logger.log_value("val_avg_reward", avg_reward, step)
 
