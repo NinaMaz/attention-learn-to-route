@@ -17,26 +17,6 @@ def set_decode_type(model, decode_type):
         model = model.module
     model.set_decode_type(decode_type)
 
-class RCRLDiscriminator(nn.Module):
-    def __init__(self, embedding_dim, graph_size, kernel_size = 3):
-        super().__init__()
-        self.conv_1 = nn.Conv2d(2, 1, kernel_size)
-        conv_nodes_dim = graph_size - (kernel_size - 1)
-        conv_feat_dim = embedding_dim - (kernel_size - 1)
-        self.lin_1 = nn.Linear(conv_nodes_dim * conv_feat_dim, 1024)
-        self.act_1 = nn.ReLU()
-        # TODO: ??? nn.Dropout(0.3),
-        self.lin_2 = nn.Linear(1024, 1)
-        self.act_2 = nn.Sigmoid()
-
-
-    def forward(self, input):
-        input = self.conv_1(input)
-        input = input.squeeze().flatten(-2,-1)
-        input = self.act_1(self.lin_1(input))
-        input = self.act_2(self.lin_2(input))
-        return input
-
 class AttentionModelFixed(NamedTuple):
     """
     Context for AttentionModel decoder that is fixed during decoding so can be
@@ -145,10 +125,12 @@ class AttentionModel(nn.Module):
             )
 
         else:
-            self.init_embed = nn.Linear(node_dim, embedding_dim)
+            self.init_embed_s = nn.Linear(node_dim, embedding_dim)
+            self.init_embed_a = nn.Linear(node_dim, embedding_dim)
 
         Encoder = GraphAttentionEncoder
         Encoder_act = GraphAttentionEncoder
+        Encoder_sa = GraphAttentionEncoder
         if self.is_abscvrp:
             Encoder = EdgeWeightedGraphEncoder
 
@@ -160,6 +142,12 @@ class AttentionModel(nn.Module):
         )
 
         self.embedder_act = Encoder_act(
+            n_heads=n_heads,
+            embed_dim=embedding_dim,
+            n_layers=self.n_encode_layers,
+            normalization=normalization,
+        )
+        self.embedder_sa = Encoder_sa(
             n_heads=n_heads,
             embed_dim=embedding_dim,
             n_layers=self.n_encode_layers,
@@ -180,7 +168,13 @@ class AttentionModel(nn.Module):
         #  `embedding_dim`
         self.project_out = nn.Linear(embedding_dim, embedding_dim, bias=False)
 
-        self.discriminator = RCRLDiscriminator(embedding_dim, graph_size)
+        self.discriminator = nn.Sequential(
+            nn.Linear(embedding_dim * 2, embedding_dim // 2),
+            nn.ReLU(),
+            # TODO: ??? nn.Dropout(0.3),
+            nn.Linear(embedding_dim // 2, 1),
+            nn.Sigmoid(),
+        )
 
     def set_decode_type(self, decode_type, temp=None):
         self.decode_type = decode_type
@@ -200,9 +194,9 @@ class AttentionModel(nn.Module):
         if (
             self.checkpoint_encoder and self.training
         ):  # Only checkpoint if we need gradients
-            embeddings, _ = checkpoint(self.embedder, self._init_embed(input))
+            embeddings, _ = checkpoint(self.embedder, self._init_embed(input, state = True))
         else:
-            embeddings, _ = self.embedder(self._init_embed(input))
+            embeddings, _ = self.embedder(self._init_embed(input, state = True))
 
         _log_p, pi = self._inner(input, embeddings)
 
@@ -212,7 +206,7 @@ class AttentionModel(nn.Module):
         pi_coord = torch.cat(
             [inp[ind, :].unsqueeze(0) for inp, ind in zip(input, pi)], dim=0
         )
-        embeddings_act, _ = self.embedder_act(self._init_embed(pi_coord))
+        embeddings_act, _ = self.embedder_act(self._init_embed(pi_coord, state = False))
 
         #         ##PUT embeddings, pi, cost to buffer]
         label_pred = torch.tensor([0.0], requires_grad=True)
@@ -224,11 +218,12 @@ class AttentionModel(nn.Module):
                     embeddings_act[i, ...].detach(),
                     cost[i].detach(),
                 )
-
+             
 
             # SAMPLE from buffer
             # TODO: remove buffer sampling from evaluation phase
             if self.buffer.full:
+                
                 embeddings_buffer, embeddings_act_buffer, costs_buffer = self.buffer.sample(
                     input.shape[0]
                 )
@@ -237,17 +232,20 @@ class AttentionModel(nn.Module):
                 embeddings_sa = embeddings * embeddings_act
 
                 embeddings_sa_buffer = embeddings_buffer * embeddings_act_buffer
+                
+                _, embeddings_sa = self.embedder_sa(embeddings_sa)
+                _, embeddings_sa_buffer = self.embedder_sa(embeddings_sa_buffer)
                 # INPUT both sampled and current state, action pair to a discriminator
                 label_pred = self.discriminator(
-                    torch.stack((embeddings_sa, embeddings_sa_buffer), 1)
+                    torch.cat((embeddings_sa, embeddings_sa_buffer), 1)
                 )
                 # GET bin - the true label (implement in buffer)
                 # NOTE: for more comlpicated segmentations,
                 # implement this in ReplayBuffer.get_bin
                 #label_true = torch.eq(costs_buffer.squeeze(), cost).float().to(input)
-
+                
                 label_true = torch.le(torch.abs(costs_buffer.squeeze()-cost), torch.abs(cost)*0.125).float().to(input)
-
+                
 
             # Log likelihood is calculated within the model since returning it per
             # action does not work well with DataParallel since sequences can be of
@@ -323,7 +321,7 @@ class AttentionModel(nn.Module):
         # Calculate log_likelihood
         return log_p.sum(1)
 
-    def _init_embed(self, input):
+    def _init_embed(self, input, state = True):
 
         if self.is_abscvrp:
 
@@ -373,7 +371,10 @@ class AttentionModel(nn.Module):
                 1,
             )
         # TSP
-        return self.init_embed(input)
+        if state:
+            return self.init_embed_s(input)
+        else:
+            return self.init_embed_a(input)
 
     def _inner(self, input, embeddings):
 
