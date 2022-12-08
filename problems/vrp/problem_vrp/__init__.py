@@ -2,6 +2,7 @@ from torch.utils.data import Dataset
 import torch
 import os
 import pickle
+import copy
 
 from problems.vrp.problem_vrp.cvrp import CVRP as BaseCVRP
 from problems.vrp.problem_vrp.sdvrp import SDVRP as BaseSDVRP
@@ -53,6 +54,26 @@ class VRPDataset(Dataset):
             ]
 
         self.size = len(self.data)
+        self.num_nodes = size
+
+    def get_subgraph(self, mask):
+        ### mask is a tensor of the same shape as data
+        assert torch.all(mask.le(self.num_nodes-1))
+        new_mask = torch.zeros((self.size,self.num_nodes,))
+        new_mask = new_mask.scatter_(1, mask, 1.)
+        
+        new_data = [
+                {
+                    "loc": torch.mul(d["loc"],new_mask[n,...].unsqueeze(-1)),
+                    # Uniform 1 - 9, scaled by capacities
+                    "demand": d["demand"]*new_mask[n,...],
+                    "depot": d["depot"],
+                }
+                for n,d in enumerate(self.data)
+            ]
+        return new_data
+
+
 
     def __len__(self):
         return self.size
