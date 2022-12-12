@@ -123,6 +123,9 @@ class AttentionModel(nn.Module):
                 nn.ReLU(),
                 nn.Linear(2 * embedding_dim, embedding_dim, bias=True),
             )
+        elif self.is_vrp:
+            self.init_embed = nn.Linear(node_dim, embedding_dim)
+            self.init_embed_a = nn.Linear(node_dim-1, embedding_dim)
 
         else:
             self.init_embed_s = nn.Linear(node_dim, embedding_dim)
@@ -190,29 +193,36 @@ class AttentionModel(nn.Module):
         using DataParallel as the results may be of different lengths on different GPUs
         :return:
         """
-
         if (
             self.checkpoint_encoder and self.training
         ):  # Only checkpoint if we need gradients
-            embeddings, _ = checkpoint(self.embedder, self._init_embed(input, state = True))
+            embeddings, _ = checkpoint(self.embedder, self._init_embed(input))
         else:
-            embeddings, _ = self.embedder(self._init_embed(input, state = True))
+            
+            embeddings, _ = self.embedder(self._init_embed(input))
 
         _log_p, pi = self._inner(input, embeddings)
 
         cost, mask = self.problem.get_costs(input, pi)
 
         #         ##GET pi encoding - action encoding
-        pi_coord = torch.cat(
-            [inp[ind, :].unsqueeze(0) for inp, ind in zip(input, pi)], dim=0
-        )
-        embeddings_act, _ = self.embedder_act(self._init_embed(pi_coord, state = False))
+        if self.is_vrp:  
+            pi_nozeros = pi[pi!=0].view(input["loc"].shape[0], input["loc"].shape[1])
+            pi_coord = torch.cat(
+                [inp[ind,:].unsqueeze(0) for inp, ind in zip(torch.cat((input["depot"].unsqueeze(1), input["loc"]), dim = 1), pi_nozeros)], dim=0
+            )
+            embeddings_act, _ = self.embedder_act(self._init_embed(torch.cat((input["depot"].unsqueeze(1), pi_coord), dim = 1), vrp_state = False))
+        else:
+            pi_coord = torch.cat(
+                [inp[ind, :].unsqueeze(0) for inp, ind in zip(input, pi)], dim=0
+            )
+            embeddings_act, _ = self.embedder_act(self._init_embed(pi_coord, tsp_state = False))
 
         #         ##PUT embeddings, pi, cost to buffer]
         label_pred = torch.tensor([0.0], requires_grad=True)
         label_true = torch.tensor([0.0], requires_grad=True)
         if self.training:
-            for i in range(input.shape[0]):
+            for i in range(embeddings.shape[0]):
                 self.buffer.add(
                     embeddings[i, ...].detach(),
                     embeddings_act[i, ...].detach(),
@@ -225,7 +235,7 @@ class AttentionModel(nn.Module):
             if self.buffer.full:
                 
                 embeddings_buffer, embeddings_act_buffer, costs_buffer = self.buffer.sample(
-                    input.shape[0]
+                    embeddings.shape[0]
                 )
                 embeddings_buffer.requires_grad = True
                 embeddings_act_buffer.requires_grad = True
@@ -244,7 +254,7 @@ class AttentionModel(nn.Module):
                 # implement this in ReplayBuffer.get_bin
                 #label_true = torch.eq(costs_buffer.squeeze(), cost).float().to(input)
                 
-                label_true = torch.le(torch.abs(costs_buffer.squeeze()-cost), torch.abs(cost)*0.125).float().to(input)
+                label_true = torch.le(torch.abs(costs_buffer.squeeze()-cost), torch.abs(cost)*0.125).float().to(embeddings)
                 
 
             # Log likelihood is calculated within the model since returning it per
@@ -321,7 +331,7 @@ class AttentionModel(nn.Module):
         # Calculate log_likelihood
         return log_p.sum(1)
 
-    def _init_embed(self, input, state = True):
+    def _init_embed(self, input, tsp_state = True, vrp_state = True):
 
         if self.is_abscvrp:
 
@@ -354,24 +364,28 @@ class AttentionModel(nn.Module):
             else:
                 assert self.is_pctsp
                 features = ("deterministic_prize", "penalty")
+            
 
-            return torch.cat(
-                (
-                    self.init_embed_depot(input["depot"])[:, None, :],
-                    self.init_embed(
-                        torch.cat(
-                            (
-                                input["loc"],
-                                *(input[feat][:, :, None] for feat in features),
-                            ),
-                            -1,
-                        )
+            if vrp_state:
+                return torch.cat(
+                    (
+                        self.init_embed_depot(input["depot"])[:, None, :],
+                        self.init_embed(
+                            torch.cat(
+                                (
+                                    input["loc"],
+                                    *(input[feat][:, :, None] for feat in features),
+                                ),
+                                -1,
+                            )
+                        ),
                     ),
-                ),
-                1,
-            )
+                    1,
+                )
+            else:
+                return self.init_embed_a(input)
         # TSP
-        if state:
+        if tsp_state:
             return self.init_embed_s(input)
         else:
             return self.init_embed_a(input)

@@ -67,12 +67,20 @@ def run(opts):
     if load_path is not None:
         print("  [*] Loading data from {}".format(load_path))
         load_data = torch_load_cpu(load_path)
-    buffer = ReplayBuffer(
-        opts.buffer_size,
-        (opts.graph_size, opts.embedding_dim),
-        (opts.graph_size, opts.embedding_dim),
-        opts.device,
-    )
+    if problem.NAME == 'cvrp':
+        buffer = ReplayBuffer(
+            opts.buffer_size,
+            (opts.graph_size+1, opts.embedding_dim),
+            (opts.graph_size+1, opts.embedding_dim),
+            opts.device,
+        )
+    else:
+        buffer = ReplayBuffer(
+            opts.buffer_size,
+            (opts.graph_size, opts.embedding_dim),
+            (opts.graph_size, opts.embedding_dim),
+            opts.device,
+        )
     print(torch.cuda.device_count())
     # Initialize model
     model_class = {

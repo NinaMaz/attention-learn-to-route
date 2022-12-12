@@ -57,16 +57,15 @@ class VRPDataset(Dataset):
         self.num_nodes = size
 
     def get_subgraph(self, mask):
-        ### mask is a tensor of the same shape as data
-        assert torch.all(mask.le(self.num_nodes-1))
-        new_mask = torch.zeros((self.size,self.num_nodes,))
-        new_mask = new_mask.scatter_(1, mask, 1.)
-        
+        #mask: tensor of shape [Data_size, GS + 1, 1]
+        mask_wo_depot = mask[:,1:,:]
+        new_mask = mask_wo_depot.ge(0.5).int()
+
         new_data = [
                 {
-                    "loc": torch.mul(d["loc"],new_mask[n,...].unsqueeze(-1)),
+                    "loc": torch.mul(d["loc"],new_mask[n,...]),
                     # Uniform 1 - 9, scaled by capacities
-                    "demand": d["demand"]*new_mask[n,...],
+                    "demand": d["demand"]*new_mask[n,...].squeeze(-1),
                     "depot": d["depot"],
                 }
                 for n,d in enumerate(self.data)
