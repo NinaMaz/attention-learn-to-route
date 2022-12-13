@@ -220,3 +220,19 @@ def sample_many(inner_func, get_cost_func, input, batch_rep=1, iter_rep=1):
     minpis = pis[torch.arange(pis.size(0), out=argmincosts.new()), argmincosts]
 
     return minpis, mincosts
+
+def get_subgraph(data, mask):
+    #mask: tensor of shape [Data_size, GS + 1, 1]
+    mask_wo_depot = mask[:,1:,:]
+    new_mask = mask_wo_depot.ge(0.5).int()
+
+    new_data = [
+            {
+                "loc": torch.mul(d["loc"],new_mask[n,...]),
+                # Uniform 1 - 9, scaled by capacities
+                "demand": d["demand"]*new_mask[n,...].squeeze(-1),
+                "depot": d["depot"],
+            }
+            for n,d in enumerate(data)
+        ]
+    return new_data

@@ -10,7 +10,7 @@ from torch.nn import DataParallel
 
 from nets.attention_model import set_decode_type
 from utils.log_utils import log_values
-from utils import move_to
+from utils import move_to, get_subgraph
 
 
 def get_inner_model(model):
@@ -81,6 +81,7 @@ def clip_grad_norms(param_groups, max_norm=math.inf):
 
 def train_epoch(
     model,
+    knapsack_model,
     optimizer,
     baseline,
     lr_scheduler,
@@ -116,17 +117,25 @@ def train_epoch(
 
     # Put model in train mode!
     model.train()
+    knapsack_model.eval()
     set_decode_type(model, "sampling")
-
+    mask_list = []
     for batch_id, batch in enumerate(
         tqdm(training_dataloader, disable=opts.no_progress_bar)
     ):
-
+        x, bl_val = baseline.unwrap_batch(batch)
+        x = move_to(x, opts.device)
+        bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
+        mask = knapsack_model(x)
+        new_x = get_subgraph([x], mask[-1,:,:].unsqueeze(0))[0]
         train_batch(
-            model, optimizer, baseline, epoch, batch_id, step, batch, tb_logger, opts
+            model, optimizer, baseline, epoch, batch_id, step, new_x, bl_val, tb_logger, opts
         )
 
         step += 1
+        mask_list.append(mask)
+    data_mask = torch.cat(mask_list, dim = 0)
+    
 
     epoch_duration = time.time() - start_time
     print(
@@ -163,12 +172,11 @@ def train_epoch(
 
 
 def train_batch(
-    model, optimizer, baseline, epoch, batch_id, step, batch, tb_logger, opts
+    model, optimizer, baseline, epoch, batch_id, step, x, bl_val, tb_logger, opts
 ):
-    x, bl_val = baseline.unwrap_batch(batch)
-    print(x["loc"].shape)
-    x = move_to(x, opts.device)
-    bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
+    #x, bl_val = baseline.unwrap_batch(batch)
+    #x = move_to(x, opts.device)
+    #bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
 
     # Evaluate model, get costs and log probabilities
     cost, log_likelihood, label_pred, label_true = model(x)
