@@ -1,6 +1,4 @@
 import wandb
-
-
 def log_values(
     cost,
     grad_norms,
@@ -25,26 +23,10 @@ def log_values(
     print("grad_norm: {}, clipped: {}".format(grad_norms[0], grad_norms_clipped[0]))
 
     # Log values to tensorboard
-    wandb.log(
-        {
-            "avg_cost": avg_cost,
-            "actor_loss": reinforce_loss.item(),
-            "rcrl_loss": rcrl_loss.item(),
-            "nll": -log_likelihood.mean().item(),
-            "grad_norm": grad_norms[0],
-            "grad_norm_clipped": grad_norms_clipped[0],
-        },
-        step=step,
-    )
+    wandb.log({"avg_cost":avg_cost, "actor_loss":reinforce_loss.item(), "aux_loss":rcrl_loss.item(), "nll":-log_likelihood.mean().item(),
+              "grad_norm":grad_norms[0], "grad_norm_clipped":grad_norms_clipped[0]}, step = step)
     if opts.baseline == "critic":
-        wandb.log(
-            {
-                "critic_loss": bl_loss.item(),
-                "critic_grad_norm": grad_norms[1],
-                "critic_grad_norm_clipped": grad_norms_clipped[1],
-            },
-            step=step,
-        )
+        wandb.log({"critic_loss":bl_loss.item(), "critic_grad_norm":grad_norms[1], "critic_grad_norm_clipped":grad_norms_clipped[1]}, step = step)
     if not opts.no_tensorboard:
         tb_logger.log_value("avg_cost", avg_cost, step)
 

@@ -68,8 +68,7 @@ def run(opts):
     if load_path is not None:
         print("  [*] Loading data from {}".format(load_path))
         load_data = torch_load_cpu(load_path)
-    if problem.NAME == 'cvrp':
-        knpsck_model = KnapsackModel(opts.embedding_dim, n_encode_layers=opts.n_encode_layers, normalization=opts.normalization)
+    knpsck_model = KnapsackModel(opts.embedding_dim, n_encode_layers=opts.n_encode_layers, normalization=opts.normalization).to(opts.device)
     if problem.NAME == 'cvrp':
         buffer = ReplayBuffer(
             opts.buffer_size,
@@ -161,6 +160,9 @@ def run(opts):
             else []
         )
     )
+    knpsck_optimizer = optim.Adam(
+        [{"params": knpsck_model.parameters(), "lr": opts.lr_model}]
+    )
 
     # Load optimizer state
     if "optimizer" in load_data:
@@ -174,6 +176,9 @@ def run(opts):
     # Initialize learning rate scheduler, decay by lr_decay once per epoch!
     lr_scheduler = optim.lr_scheduler.LambdaLR(
         optimizer, lambda epoch: opts.lr_decay**epoch
+    )
+    knpsck_lr_scheduler = optim.lr_scheduler.LambdaLR(
+        knpsck_optimizer, lambda epoch: opts.lr_decay**epoch
     )
 
     # Start the actual training loop
@@ -207,8 +212,10 @@ def run(opts):
                 model,
                 knpsck_model,
                 optimizer,
+                knpsck_optimizer,
                 baseline,
                 lr_scheduler,
+                knpsck_lr_scheduler,
                 epoch,
                 val_dataset,
                 problem,

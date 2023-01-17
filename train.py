@@ -17,10 +17,11 @@ def get_inner_model(model):
     return model.module if isinstance(model, DataParallel) else model
 
 
-def validate(model, dataset, opts):
+def validate(model, knapsack_model, dataset, opts):
     # Validate
     print("Validating...")
-    cost = rollout(model, dataset, opts)
+
+    cost = rollout(model, dataset, opts, knapsack_model)
     avg_cost = cost.mean()
     print(
         "Validation overall avg_cost: {} +- {}".format(
@@ -31,13 +32,18 @@ def validate(model, dataset, opts):
     return avg_cost
 
 
-def rollout(model, dataset, opts):
+def rollout(model, dataset, opts, knapsack_model = None):
     # Put in greedy evaluation mode!
     set_decode_type(model, "greedy")
     model.eval()
+    if knapsack_model:
+        knapsack_model.eval()
 
     def eval_model_bat(bat):
         with torch.no_grad():
+            if knapsack_model:
+                mask = knapsack_model(move_to(bat, opts.device))
+                bat = get_subgraph([move_to(bat, opts.device)], mask)[0]
             cost, _, _, _ = model(move_to(bat, opts.device))
         return cost.data.cpu()
 
@@ -83,8 +89,10 @@ def train_epoch(
     model,
     knapsack_model,
     optimizer,
+    knapsack_optimizer,
     baseline,
     lr_scheduler,
+    knapsack_scheduler,
     epoch,
     val_dataset,
     problem,
@@ -100,6 +108,7 @@ def train_epoch(
     start_time = time.time()
 
     wandb.log({"learnrate_pg0": optimizer.param_groups[0]["lr"]}, step=step)
+    wandb.log({"knpsck_learnrate_pg0": knapsack_optimizer.param_groups[0]["lr"]}, step=step)
     if not opts.no_tensorboard:
         tb_logger.log_value("learnrate_pg0", optimizer.param_groups[0]["lr"], step)
 
@@ -114,28 +123,49 @@ def train_epoch(
     training_dataloader = DataLoader(
         training_dataset, batch_size=opts.batch_size, num_workers=1
     )
+    model.train()
+    knapsack_model.train()    
 
     # Put model in train mode!
-    model.train()
-    knapsack_model.eval()
+
     set_decode_type(model, "sampling")
-    mask_list = []
     for batch_id, batch in enumerate(
         tqdm(training_dataloader, disable=opts.no_progress_bar)
     ):
+        
+        masked_logits_list = [] #
+        cost_list = []  #
         x, bl_val = baseline.unwrap_batch(batch)
         x = move_to(x, opts.device)
-        bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
-        mask = knapsack_model(x)
-        new_x = get_subgraph([x], mask[-1,:,:].unsqueeze(0))[0]
-        train_batch(
-            model, optimizer, baseline, epoch, batch_id, step, new_x, bl_val, tb_logger, opts
-        )
+        ep_step = 0  #
+        while x["loc"].nonzero().nelement() !=0 and ep_step < opts.graph_size: 
+            bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
+            logits, mask = knapsack_model(x)
+            x = get_subgraph([x], mask)[0]#
+            cost = train_batch(
+                model, optimizer, baseline, epoch, batch_id, step, x, bl_val, tb_logger, opts #
+            )
+
+            penalty = 1.0
+            if mask[mask==1].nelement() == 0:
+                penalty = 10.0
+            masked_logits_list.append(mask*logits) #
+            cost_list.append(cost+penalty)  #
+            ep_step += 1 #
+        data_mask = torch.stack(masked_logits_list, dim = 0) #
+        data_cost = torch.stack(cost_list, dim = 0) #
+        
+        knapsack_loss = (data_cost*data_mask.sum(2).squeeze()).mean()
+        print(knapsack_loss)
+        knapsack_optimizer.zero_grad()
+        knapsack_loss.backward()
+        # Clip gradient norms and get (clipped) gradient norms for logging
+        grad_norms = clip_grad_norms(knapsack_optimizer.param_groups, opts.max_grad_norm)
+        knapsack_optimizer.step()
+        wandb.log({"knapsack_loss": knapsack_loss.item()}, step=step)
+
 
         step += 1
-        mask_list.append(mask)
-    data_mask = torch.cat(mask_list, dim = 0)
-    
 
     epoch_duration = time.time() - start_time
     print(
@@ -151,6 +181,7 @@ def train_epoch(
         torch.save(
             {
                 "model": get_inner_model(model).state_dict(),
+                "knapsack_model": get_inner_model(knapsack_model).state_dict(),
                 "optimizer": optimizer.state_dict(),
                 "rng_state": torch.get_rng_state(),
                 "cuda_rng_state": torch.cuda.get_rng_state_all(),
@@ -159,8 +190,8 @@ def train_epoch(
             os.path.join(opts.save_dir, "epoch-{}.pt".format(epoch)),
         )
 
-    avg_reward = validate(model, val_dataset, opts)
-
+    avg_reward = validate(model, knapsack_model, val_dataset, opts)
+    print(avg_reward)
     wandb.log({"val_avg_reward": avg_reward}, step=step)
     if not opts.no_tensorboard:
         tb_logger.log_value("val_avg_reward", avg_reward, step)
@@ -169,6 +200,7 @@ def train_epoch(
 
     # lr_scheduler should be called at end of epoch
     lr_scheduler.step()
+    knapsack_scheduler.step()
 
 
 def train_batch(
@@ -213,3 +245,4 @@ def train_batch(
             tb_logger,
             opts,
         )
+    return cost
