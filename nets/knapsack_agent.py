@@ -24,12 +24,13 @@ class KnapsackModel(torch.nn.Module):
             torch.nn.ReLU(),
             torch.nn.Linear(64, 1),
         )
+        self.layers[-1].bias.data.fill_(10)
         self.out_act = torch.nn.Sigmoid()
     def forward(self, input, bernoulli_prob = 0.5):  
         embeddings, _ = self.embedder(self._init_embed(input))  
         logits = self.layers(embeddings)
         #rand_var = torch.bernoulli(torch.ones_like(input)*bernoulli_prob)
-        mask = sample_nonzero(logits, dim = 1)[0]
+        mask, _ = sample_nonzero(logits[:,1:,:], dim = 1)
         return logits, mask
 
     def _init_embed(self, input):
@@ -51,3 +52,4 @@ class KnapsackModel(torch.nn.Module):
             ),
             1,
         )
+

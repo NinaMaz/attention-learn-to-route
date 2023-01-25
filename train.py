@@ -11,6 +11,7 @@ from torch.nn import DataParallel
 from nets.attention_model import set_decode_type
 from utils.log_utils import log_values
 from utils import move_to, get_subgraph
+from utils.boolean_nonzero import logp_nonzero
 
 
 def get_inner_model(model):
@@ -134,35 +135,41 @@ def train_epoch(
     ):
         
         masked_logits_list = [] #
-        cost_list = []  #
+        cost_list = [] 
+        reg_list = [] #
         x, bl_val = baseline.unwrap_batch(batch)
         x = move_to(x, opts.device)
         ep_step = 0  #
         while x["loc"].nonzero().nelement() !=0 and ep_step < opts.graph_size: 
             bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
             logits, mask = knapsack_model(x)
-            x = get_subgraph([x], mask)[0]#
+            subgraph, x = get_subgraph(x, mask)#
             cost = train_batch(
-                model, optimizer, baseline, epoch, batch_id, step, x, bl_val, tb_logger, opts #
+                model, optimizer, baseline, epoch, batch_id, step, subgraph, bl_val, tb_logger, opts #
             )
 
             penalty = 1.0
-            if mask[mask==1].nelement() == 0:
+#             print(mask)
+            if mask[mask==1.0].nelement() == 0: 
+#                 print("PENALTY")
                 penalty = 10.0
-            masked_logits_list.append(mask*logits) #
-            cost_list.append(cost+penalty)  #
+            masked_logits_list.append(torch.cat((torch.ones(logits.shape[0], 1, 1).to(logits), mask*logits[:,1:,:]), dim = 1)) #
+            cost_list.append(cost+penalty)
+            reg_list.append(logp_nonzero(logits[:,1:,:], dim = 1))#
             ep_step += 1 #
         data_mask = torch.stack(masked_logits_list, dim = 0) #
         data_cost = torch.stack(cost_list, dim = 0) #
-        
-        knapsack_loss = (data_cost*data_mask.sum(2).squeeze()).mean()
-        print(knapsack_loss)
+        reg_value = torch.stack(reg_list, dim = 0)
+        knapsack_loss = (data_cost*data_mask.sum(2).squeeze()).mean() + reg_value.mean()*1
+#         print('REG ',reg_value.mean())
+#         print('KNP ',(data_cost*data_mask.sum(2).squeeze()).mean())
         knapsack_optimizer.zero_grad()
         knapsack_loss.backward()
         # Clip gradient norms and get (clipped) gradient norms for logging
         grad_norms = clip_grad_norms(knapsack_optimizer.param_groups, opts.max_grad_norm)
         knapsack_optimizer.step()
         wandb.log({"knapsack_loss": knapsack_loss.item()}, step=step)
+        wandb.log({"knapsack_avg_cost": data_cost.mean().item()}, step=step)
 
 
         step += 1

@@ -8,7 +8,6 @@ from multiprocessing import Pool
 import torch.nn.functional as F
 from utils.replay_buffer import ReplayBuffer
 
-
 def load_problem(name):
     from problems import TSP, CVRP, SDVRP, OP, AbsCVRP, PCTSPDet, PCTSPStoch
 
@@ -223,16 +222,20 @@ def sample_many(inner_func, get_cost_func, input, batch_rep=1, iter_rep=1):
 
 def get_subgraph(data, mask):
     #mask: tensor of shape [Data_size, GS + 1, 1]
-    mask_wo_depot = mask[:,1:,:]
+    #mask_wo_depot = mask[:,1:,:]
 
-    new_data = [
-            {
-                "loc": torch.mul(d["loc"],mask_wo_depot[n,...]),
-                # Uniform 1 - 9, scaled by capacities
-                "demand": d["demand"]*mask_wo_depot[n,...].squeeze(-1),
-                "depot": d["depot"],
-            }
-            for n,d in enumerate(data)
-        ]
-    return new_data
+    masked_subgraph = {
+        "loc": torch.mul(data["loc"],mask),
+                    # Uniform 1 - 9, scaled by capacities
+        "demand": data["demand"]*mask.squeeze(-1),
+        "depot": data["depot"]
+    }
 
+    new_data = {
+        "loc": torch.mul(data["loc"], 1. - mask),
+        # Uniform 1 - 9, scaled by capacities
+        "demand": data["demand"]*(1. - mask).squeeze(-1),
+        "depot": data["depot"]
+    }
+
+    return masked_subgraph, new_data
