@@ -43,9 +43,16 @@ def rollout(model, dataset, opts, knapsack_model = None):
     def eval_model_bat(bat):
         with torch.no_grad():
             if knapsack_model:
-                mask = knapsack_model(move_to(bat, opts.device))
-                bat = get_subgraph([move_to(bat, opts.device)], mask)[0]
-            cost, _, _, _ = model(move_to(bat, opts.device))
+                ep_step = 0
+                cost = 0
+                while bat["loc"].nonzero().nelement() !=0 and ep_step < opts.graph_size: 
+                    logits, mask = knapsack_model(move_to(bat, opts.device))
+                    subgraph, bat = get_subgraph(move_to(bat, opts.device), mask)
+                    ep_step += 1
+                    partial_cost, _, _, _ = model(move_to(subgraph, opts.device))
+                    cost += partial_cost
+            else:
+                cost, _, _, _ = model(move_to(bat, opts.device))
         return cost.data.cpu()
 
     return torch.cat(
@@ -58,6 +65,7 @@ def rollout(model, dataset, opts, knapsack_model = None):
         ],
         0,
     )
+
 
 
 def clip_grad_norms(param_groups, max_norm=math.inf):
@@ -155,12 +163,12 @@ def train_epoch(
                 penalty = 10.0
             masked_logits_list.append(torch.cat((torch.ones(logits.shape[0], 1, 1).to(logits), mask*logits[:,1:,:]), dim = 1)) #
             cost_list.append(cost+penalty)
-            reg_list.append(logp_nonzero(logits[:,1:,:], dim = 1))#
+            reg_list.append((-1)*logp_nonzero(logits[:,1:,:], dim = 1))#
             ep_step += 1 #
         data_mask = torch.stack(masked_logits_list, dim = 0) #
         data_cost = torch.stack(cost_list, dim = 0) #
         reg_value = torch.stack(reg_list, dim = 0)
-        knapsack_loss = (data_cost*data_mask.sum(2).squeeze()).mean() + reg_value.mean()*1
+        knapsack_loss = (data_cost*data_mask.sum(2).squeeze()).mean() + reg_value.mean()
 #         print('REG ',reg_value.mean())
 #         print('KNP ',(data_cost*data_mask.sum(2).squeeze()).mean())
         knapsack_optimizer.zero_grad()
@@ -170,6 +178,7 @@ def train_epoch(
         knapsack_optimizer.step()
         wandb.log({"knapsack_loss": knapsack_loss.item()}, step=step)
         wandb.log({"knapsack_avg_cost": data_cost.mean().item()}, step=step)
+        wandb.log({"reg_value": reg_value.mean().item()}, step=step)
 
 
         step += 1
