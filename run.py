@@ -10,6 +10,7 @@ import torch.optim as optim
 
 from nets.critic_network import CriticNetwork
 from train import train_epoch, validate, get_inner_model
+from train_ac import train_epoch_ac
 from reinforce_baselines import (
     NoBaseline,
     ExponentialBaseline,
@@ -21,14 +22,14 @@ from nets.attention_model import AttentionModel
 from nets.pointer_network import PointerNetwork, CriticNetworkLSTM
 from utils import torch_load_cpu, load_problem
 from utils.replay_buffer import ReplayBuffer
-from nets.knapsack_agent import KnapsackModel
+from nets.knapsack_agent import KnapsackModel, KnapsackModelAC
 
 __spec__ = None  # for tracing with pdb
 
 
 def run(opts):
 
-    wandb.init(name="AM_RCRL", project="SbRLCO")
+    wandb.init(name=opts.run_name, project="SbRLCO")
     # Pretty print the run args
     pp.pprint(vars(opts))
 
@@ -54,7 +55,10 @@ def run(opts):
         json.dump(vars(opts), f, indent=True)
 
     # Set the device
-    opts.device = torch.device("cuda:0" if opts.use_cuda else "cpu")
+    device = opts.device if opts.device is not None else "cpu"
+    opts.device = torch.device(device if opts.use_cuda else "cpu")
+    print(opts.device)
+
 
     # Figure out what's the problem
     problem = load_problem(opts.problem)
@@ -68,7 +72,11 @@ def run(opts):
     if load_path is not None:
         print("  [*] Loading data from {}".format(load_path))
         load_data = torch_load_cpu(load_path)
-    knpsck_model = KnapsackModel(opts.embedding_dim, n_encode_layers=opts.n_encode_layers, normalization=opts.normalization).to(opts.device)
+    if opts.knapsack_agent == "actor-critic":
+        knpsck_model = KnapsackModelAC(opts.embedding_dim, n_encode_layers=opts.n_encode_layers,
+                                     normalization=opts.normalization).to(opts.device)
+    else:
+        knpsck_model = KnapsackModel(opts.embedding_dim, n_encode_layers=opts.n_encode_layers, normalization=opts.normalization).to(opts.device)
     if problem.NAME == 'cvrp':
         buffer = ReplayBuffer(
             opts.buffer_size,
@@ -105,8 +113,8 @@ def run(opts):
         graph_size=opts.graph_size,
     ).to(opts.device)
 
-    if opts.use_cuda and torch.cuda.device_count() > 1:
-        model = torch.nn.DataParallel(model)
+    # if opts.use_cuda and torch.cuda.device_count() > 1:
+    #     model = torch.nn.DataParallel(model)
 
     # Overwrite model parameters by parameters to load
     model_ = get_inner_model(model)
@@ -161,7 +169,7 @@ def run(opts):
         )
     )
     knpsck_optimizer = optim.Adam(
-        [{"params": knpsck_model.parameters(), "lr": opts.lr_model}]
+        [{"params": knpsck_model.parameters(), "lr": opts.lr_knapsack}]
     )
 
     # Load optimizer state
@@ -208,20 +216,36 @@ def run(opts):
         validate(model, val_dataset, opts)
     else:
         for epoch in range(opts.epoch_start, opts.epoch_start + opts.n_epochs):
-            train_epoch(
-                model,
-                knpsck_model,
-                optimizer,
-                knpsck_optimizer,
-                baseline,
-                lr_scheduler,
-                knpsck_lr_scheduler,
-                epoch,
-                val_dataset,
-                problem,
-                tb_logger,
-                opts,
-            )
+            if opts.knapsack_agent == "actor-critic":
+                train_epoch_ac(
+                    model,
+                    knpsck_model,
+                    optimizer,
+                    knpsck_optimizer,
+                    baseline,
+                    lr_scheduler,
+                    knpsck_lr_scheduler,
+                    epoch,
+                    val_dataset,
+                    problem,
+                    tb_logger,
+                    opts,
+                )
+            else:
+                train_epoch(
+                    model,
+                    knpsck_model,
+                    optimizer,
+                    knpsck_optimizer,
+                    baseline,
+                    lr_scheduler,
+                    knpsck_lr_scheduler,
+                    epoch,
+                    val_dataset,
+                    problem,
+                    tb_logger,
+                    opts,
+                )
 
 
 if __name__ == "__main__":

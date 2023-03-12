@@ -15,6 +15,9 @@ def get_options(args=None):
         "--problem", default="tsp", help="The problem to solve, default 'tsp'"
     )
     parser.add_argument(
+        "--knapsack_agent", default="default", help="Agent. Currently default and actor-critic are supported"
+    )
+    parser.add_argument(
         "--graph_size", type=int, default=20, help="The size of the problem graph"
     )
     parser.add_argument(
@@ -77,6 +80,12 @@ def get_options(args=None):
     # Training
     parser.add_argument(
         "--lr_model",
+        type=float,
+        default=1e-4,
+        help="Set the learning rate for the actor network",
+    )
+    parser.add_argument(
+        "--lr_knapsack",
         type=float,
         default=1e-4,
         help="Set the learning rate for the actor network",
@@ -156,6 +165,12 @@ def get_options(args=None):
         default=None,
         help="Data distribution to use during training, \
             defaults and options depend on problem.",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="device for example: cuda:0",
     )
     parser.add_argument(
         "--buffer_size",

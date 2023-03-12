@@ -46,7 +46,7 @@ def rollout(model, dataset, opts, knapsack_model = None):
                 ep_step = 0
                 cost = 0
                 while bat["loc"].nonzero().nelement() !=0 and ep_step < opts.graph_size: 
-                    logits, mask = knapsack_model(move_to(bat, opts.device))
+                    logits, mask, *_ = knapsack_model(move_to(bat, opts.device))
                     subgraph, bat = get_subgraph(move_to(bat, opts.device), mask)
                     ep_step += 1
                     partial_cost, _, _, _ = model(move_to(subgraph, opts.device))
@@ -146,11 +146,13 @@ def train_epoch(
         cost_list = [] 
         reg_list = [] #
         x, bl_val = baseline.unwrap_batch(batch)
+        # x = dataset item: {"loc", "demand", "depot"}
+        # bl_val = baseline values [B]
         x = move_to(x, opts.device)
         ep_step = 0  #
         while x["loc"].nonzero().nelement() !=0 and ep_step < opts.graph_size: 
             bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
-            logits, mask = knapsack_model(x)
+            logits, mask = knapsack_model(x) # mask: 1 = include, 0 = exclude
             subgraph, x = get_subgraph(x, mask)#
             cost = train_batch(
                 model, optimizer, baseline, epoch, batch_id, step, subgraph, bl_val, tb_logger, opts #

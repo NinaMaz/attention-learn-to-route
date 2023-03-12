@@ -28,7 +28,6 @@ def log_values(
     wandb.log(
         {
             "avg_cost": avg_cost,
-            "actor_loss": reinforce_loss.item(),
             "aux_loss": rcrl_loss.item(),
             "nll": -log_likelihood.mean().item(),
             "grad_norm": grad_norms[0],
