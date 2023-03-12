@@ -23,7 +23,7 @@ def sample_bernoulli(z: Tensor, *, dtype: torch.dtype = torch.float) -> Tensor:
 
 
 def sample_nonzero(
-    z: Tensor, dim: int = -1, *, dtype: torch.dtype = torch.float
+    z: Tensor, dim: int = -1, *, dtype: torch.dtype = torch.bool
 ) -> tuple[Tensor, Tensor]:
     """Darw a non-zero boolean vector from the logits `z` with rejection sampling"""
     sample = torch.zeros_like(z, dtype=dtype)

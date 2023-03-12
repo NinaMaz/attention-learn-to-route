@@ -232,9 +232,9 @@ def get_subgraph(data, mask):
     }
 
     new_data = {
-        "loc": torch.mul(data["loc"], 1. - mask),
+        "loc": torch.mul(data["loc"], torch.logical_not(mask)),
         # Uniform 1 - 9, scaled by capacities
-        "demand": data["demand"]*(1. - mask).squeeze(-1),
+        "demand": data["demand"] * torch.logical_not(mask).squeeze(-1),
         "depot": data["depot"]
     }
 
