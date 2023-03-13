@@ -212,9 +212,10 @@ def run(opts):
         print("Resuming after {}".format(epoch_resume))
         opts.epoch_start = epoch_resume + 1
 
-    if opts.eval_only:
-        validate(model, val_dataset, opts)
-    else:
+    avg_reward = validate(model, knpsck_model, val_dataset, opts)
+    wandb.log({"val_avg_reward": avg_reward}, step=0)
+
+    if not opts.eval_only:
         for epoch in range(opts.epoch_start, opts.epoch_start + opts.n_epochs):
             if opts.knapsack_agent == "actor-critic":
                 train_epoch_ac(

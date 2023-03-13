@@ -45,8 +45,12 @@ def rollout(model, dataset, opts, knapsack_model = None):
             if knapsack_model:
                 ep_step = 0
                 cost = 0
-                while bat["loc"].nonzero().nelement() !=0 and ep_step < opts.graph_size: 
-                    logits, mask, *_ = knapsack_model(move_to(bat, opts.device))
+                valid_mask = torch.ones(bat["loc"].shape[0], opts.graph_size, 1, dtype=torch.bool, device=opts.device)
+                depot_mask = torch.ones(bat["loc"].shape[0], 1, 1, dtype=torch.bool, device=opts.device)
+                while bat["loc"].nonzero().nelement() !=0 and ep_step < opts.graph_size:
+                    src_pad_mask = torch.cat([valid_mask, depot_mask], dim=1)
+                    logits, mask, *_ = knapsack_model(move_to(bat, opts.device), src_pad_mask.squeeze())
+                    valid_mask = valid_mask * torch.logical_not(mask)
                     subgraph, bat = get_subgraph(move_to(bat, opts.device), mask)
                     ep_step += 1
                     partial_cost, _, _, _ = model(move_to(subgraph, opts.device))

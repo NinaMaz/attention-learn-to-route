@@ -1,5 +1,5 @@
 import torch
-from nets.graph_encoder import GraphAttentionEncoder
+from nets.graph_encoder import GraphAttentionEncoder, GraphAttentionEncoderMask
 from utils.boolean_nonzero import sample_nonzero
 
 
@@ -62,7 +62,7 @@ class KnapsackModelAC(torch.nn.Module):
     def __init__(self, embedding_dim, n_heads=8, n_encode_layers=2, normalization="batch"):
         super().__init__()
 
-        Encoder = GraphAttentionEncoder
+        Encoder = GraphAttentionEncoderMask
         self.embedder = Encoder(
             n_heads=n_heads,
             embed_dim=embedding_dim,
@@ -93,9 +93,9 @@ class KnapsackModelAC(torch.nn.Module):
         # self.out_act = torch.nn.Sigmoid()
 
 
-    def forward(self, input, bernoulli_prob = 0.5):
+    def forward(self, input, mask):
         # loc: [B, N, 2], depot: [B, 2], demand: [B, N]
-        embeddings, _ = self.embedder(self._init_embed(input))  # [batch_size, n_nodes, dim]
+        embeddings, _ = self.embedder(self._init_embed(input), mask)  # [batch_size, n_nodes, dim]
         logits = self.policy_layers(embeddings)  # [batch_size, n_nodes, 1]
         value = self.val_layers(embeddings.mean(dim=1)) # [batch_size, 1]
         #rand_var = torch.bernoulli(torch.ones_like(input)*bernoulli_prob)

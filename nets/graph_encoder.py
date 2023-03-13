@@ -214,3 +214,48 @@ class GraphAttentionEncoder(nn.Module):
             h,  # (batch_size, graph_size, embed_dim)
             h.mean(dim=1),  # average to get embedding of graph, (batch_size, embed_dim)
         )
+
+
+class GraphAttentionEncoderMask(nn.Module):
+    def __init__(
+        self,
+        n_heads,
+        embed_dim,
+        n_layers,
+        node_dim=None,
+        normalization="batch",
+        feed_forward_hidden=512,
+    ):
+        super().__init__()
+
+        # To map input to embedding space
+        self.init_embed = (
+            nn.Linear(node_dim, embed_dim) if node_dim is not None else None
+        )
+
+        self.layers = torch.nn.ModuleList([
+            nn.TransformerEncoderLayer(d_model=embed_dim, nhead=n_heads,
+                                       dim_feedforward=feed_forward_hidden, batch_first=True)
+            for _ in range(n_layers)
+        ])
+
+
+    def forward(self, x, mask=None):
+        # Batch multiply to get initial embeddings of nodes
+        h = (
+            self.init_embed(x.view(-1, x.size(-1))).view(*x.size()[:2], -1)
+            if self.init_embed is not None
+            else x
+        )
+
+        # h: (batch_size, n_graph, feature_dim), mask: (batch_size, n_graph)
+        for l in self.layers:
+            h = l(h, src_key_padding_mask=mask.logical_not())
+            h = h * mask.unsqueeze(-1)
+
+        return (
+            # node embeddings (batch_size, graph_size, embed_dim)
+            h,
+            # average to get embedding of graph, (batch_size, embed_dim)
+            (h * mask.unsqueeze(-1)).sum(dim=1) / mask.count_nonzero(dim=1).view(-1, 1)
+        )

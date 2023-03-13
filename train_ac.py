@@ -74,9 +74,12 @@ def train_epoch_ac(
         x = move_to(x, opts.device)
         ep_step = 0  #
         valid_mask = torch.ones(opts.batch_size, opts.graph_size, 1, dtype=torch.bool, device=opts.device)
+        depot_mask = torch.ones(opts.batch_size, 1, 1, dtype=torch.bool, device=opts.device)
         while x["loc"].nonzero().nelement() !=0 and ep_step < opts.graph_size:
             bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
-            logits, select_mask, value = knapsack_model(x, valid_mask) # mask: 1 = include, 0 = exclude
+
+            src_pad_mask = torch.cat([valid_mask, depot_mask], dim=1)
+            logits, select_mask, value = knapsack_model(x, src_pad_mask.squeeze()) # mask: 1 = include, 0 = exclude
             subgraph, x = get_subgraph(x, select_mask)#
             cost = train_batch(
                 model, optimizer, baseline, epoch, batch_id, step, subgraph, bl_val, tb_logger, opts #
@@ -112,7 +115,8 @@ def train_epoch_ac(
         wandb.log({"value_loss": value_loss.item()}, step=step)
         wandb.log({"actor_loss": policy_loss.item()}, step=step)
         wandb.log({"ep_length": torch.any(data_valid, dim=-1).count_nonzero(dim=0).to(torch.float32).mean()}, step=step)
-        wandb.log({"avg_action_prob": torch.sigmoid(data_logits).mean() }, step=step)
+        wandb.log({"avg_action_prob": (torch.sigmoid(data_logits) * data_valid).sum() / data_valid.count_nonzero() }, step=step)
+        wandb.log({"Step": step}, step=step)
         step += 1
 
     epoch_duration = time.time() - start_time
