@@ -17,6 +17,9 @@ def get_options(args=None):
     parser.add_argument(
         "--knapsack_agent", default="default", help="Agent. Currently default and actor-critic are supported"
     )
+    parser.add_argument("--symmetric_force", action=argparse.BooleanOptionalAction,
+                        help="Whether to pass grads from selected actions only")
+
     parser.add_argument(
         "--graph_size", type=int, default=20, help="The size of the problem graph"
     )

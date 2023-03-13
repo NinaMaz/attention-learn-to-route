@@ -100,7 +100,7 @@ def train_epoch_ac(
         data_value = torch.stack(value_list, dim=0) # [L, Bs, 1]
         data_select = torch.stack(select_list, dim=0) # [L, Bs, Nn, 1]
         data_valid = torch.stack(valid_list, dim=0) # [L, Bs, Nn, 1]
-        policy_loss, value_loss, entropy_loss = ac_loss(data_logits, data_value, data_select, data_valid, data_cost)
+        policy_loss, value_loss, entropy_loss = ac_loss(data_logits, data_value, data_select, data_valid, data_cost, opts.symmetric_force)
         knapsack_loss = policy_loss + value_loss + entropy_loss
 #         print('REG ',reg_value.mean())
 #         print('KNP ',(data_cost*data_mask.sum(2).squeeze()).mean())

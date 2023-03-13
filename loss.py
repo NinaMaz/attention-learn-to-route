@@ -3,7 +3,7 @@ import torch.nn.functional as F
 
 
 @torch.jit.script
-def ac_loss(logits, values, select_mask, valid_mask, rewards, gamma: float = 0.99):
+def ac_loss(logits, values, select_mask, valid_mask, rewards, symmetric_force: bool = False, gamma: float = 0.99):
     # logits: [L, Bs, Nn, 1], values: [L, Bs, 1],
     # select_mask: [L, Bs, Nn, 1], valid_mask: [L, Bs, Nn], rewards: [L, Bs]
     ls, bs, nn = logits.shape[:3]
@@ -22,7 +22,11 @@ def ac_loss(logits, values, select_mask, valid_mask, rewards, gamma: float = 0.9
     probs = torch.sigmoid(logits)
 
     # policy grad loss
-    policy_loss = ( log_probs * valid_mask * (select_mask)
+    if symmetric_force:
+        force = select_mask.to(torch.float32) - select_mask.logical_not().to(torch.float32)
+    else:
+        force = select_mask
+    policy_loss = ( log_probs * valid_mask * force
             * advantage.detach().unsqueeze(-1) / valid_num).sum(dim=(0, 2)).mean()
     # critic loss
     value_loss = (advantage.pow(2) / not_done.count_nonzero(dim=0)).sum(0).mean()
