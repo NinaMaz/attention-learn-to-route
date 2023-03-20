@@ -24,6 +24,12 @@ def get_options(args=None):
         "--graph_size", type=int, default=20, help="The size of the problem graph"
     )
     parser.add_argument(
+        "--value_loss_weight", type=float, default=1.0, help="The weight for value loss"
+    )
+    parser.add_argument(
+        "--entropy_loss_weight", type=float, default=0.5, help="The weight for entropy loss"
+    )
+    parser.add_argument(
         "--batch_size",
         type=int,
         default=512,
