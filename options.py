@@ -15,7 +15,7 @@ def get_options(args=None):
         "--problem", default="tsp", help="The problem to solve, default 'tsp'"
     )
     parser.add_argument(
-        "--knapsack_agent", default="default", help="Agent. Currently default and actor-critic are supported"
+        "--knapsack_alg", default="ac", help="Agent. ac and ppo are supported"
     )
     parser.add_argument("--symmetric_force", action=argparse.BooleanOptionalAction,
                         help="Whether to pass grads from selected actions only")
@@ -24,10 +24,7 @@ def get_options(args=None):
         "--graph_size", type=int, default=20, help="The size of the problem graph"
     )
     parser.add_argument(
-        "--value_loss_weight", type=float, default=1.0, help="The weight for value loss"
-    )
-    parser.add_argument(
-        "--entropy_loss_weight", type=float, default=0.5, help="The weight for entropy loss"
+        "--loss_weights", type=float,  nargs='+', help="The weight for value loss"
     )
     parser.add_argument(
         "--batch_size",

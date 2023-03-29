@@ -8,10 +8,10 @@ import wandb
 from torch.utils.data import DataLoader
 from torch.nn import DataParallel
 
+from algorithms.utils import Trajectory
 from nets.attention_model import set_decode_type
 from utils.log_utils import log_values
-from utils import move_to, get_subgraph
-from utils.boolean_nonzero import logp_nonzero
+from utils import move_to, get_subgraph, clip_grad_norms
 
 
 def get_inner_model(model):
@@ -45,11 +45,11 @@ def rollout(model, dataset, opts, knapsack_model = None):
             if knapsack_model:
                 ep_step = 0
                 cost = 0
-                valid_mask = torch.ones(bat["loc"].shape[0], opts.graph_size, 1, dtype=torch.bool, device=opts.device)
-                depot_mask = torch.ones(bat["loc"].shape[0], 1, 1, dtype=torch.bool, device=opts.device)
+                valid_mask = torch.ones(bat["loc"].shape[0], opts.graph_size, dtype=torch.bool, device=opts.device)
+                depot_mask = torch.ones(bat["loc"].shape[0], 1, dtype=torch.bool, device=opts.device)
                 while bat["loc"].nonzero().nelement() !=0 and ep_step < opts.graph_size:
-                    src_pad_mask = torch.cat([valid_mask, depot_mask], dim=1)
-                    logits, mask, *_ = knapsack_model(move_to(bat, opts.device), src_pad_mask.squeeze())
+                    src_pad_mask = torch.cat([depot_mask, valid_mask], dim=1)
+                    logits, mask, *_ = knapsack_model(move_to(bat, opts.device), src_pad_mask)
                     valid_mask = valid_mask * torch.logical_not(mask)
                     subgraph, bat = get_subgraph(move_to(bat, opts.device), mask)
                     ep_step += 1
@@ -71,46 +71,18 @@ def rollout(model, dataset, opts, knapsack_model = None):
     )
 
 
-
-def clip_grad_norms(param_groups, max_norm=math.inf):
-    """
-    Clips the norms for all param groups to max_norm
-    and returns gradient norms before clipping.
-    :param optimizer:
-    :param max_norm:
-    :param gradient_norms_log:
-    :return: grad_norms, clipped_grad_norms: list with (clipped)
-    gradient norms per group
-    """
-    grad_norms = [
-        torch.nn.utils.clip_grad_norm_(
-            group["params"],
-            max_norm
-            if max_norm > 0
-            else math.inf,  # Inf so no clipping but still call to calc
-            norm_type=2,
-        )
-        for group in param_groups
-    ]
-    grad_norms_clipped = (
-        [min(g_norm, max_norm) for g_norm in grad_norms] if max_norm > 0 else grad_norms
-    )
-    return grad_norms, grad_norms_clipped
-
-
 def train_epoch(
-    model,
-    knapsack_model,
-    optimizer,
-    knapsack_optimizer,
-    baseline,
-    lr_scheduler,
-    knapsack_scheduler,
-    epoch,
-    val_dataset,
-    problem,
-    tb_logger,
-    opts,
+        model,
+        knapsack_alg,
+        optimizer,
+        baseline,
+        lr_scheduler,
+        knapsack_scheduler,
+        epoch,
+        val_dataset,
+        problem,
+        tb_logger,
+        opts,
 ):
     print(
         "Start train epoch {}, lr={} for run {}".format(
@@ -121,7 +93,7 @@ def train_epoch(
     start_time = time.time()
 
     wandb.log({"learnrate_pg0": optimizer.param_groups[0]["lr"]}, step=step)
-    wandb.log({"knpsck_learnrate_pg0": knapsack_optimizer.param_groups[0]["lr"]}, step=step)
+    wandb.log({"knpsck_learnrate_pg0": knapsack_alg.opt.param_groups[0]["lr"]}, step=step)
     if not opts.no_tensorboard:
         tb_logger.log_value("learnrate_pg0", optimizer.param_groups[0]["lr"], step)
 
@@ -137,57 +109,49 @@ def train_epoch(
         training_dataset, batch_size=opts.batch_size, num_workers=1
     )
     model.train()
-    knapsack_model.train()    
+    knapsack_alg.agent.train()
 
     # Put model in train mode!
 
     set_decode_type(model, "sampling")
     for batch_id, batch in enumerate(
-        tqdm(training_dataloader, disable=opts.no_progress_bar)
+            tqdm(training_dataloader, disable=opts.no_progress_bar)
     ):
-        
-        masked_logits_list = [] #
-        cost_list = [] 
-        reg_list = [] #
+
+        logits_list = []  #
+        cost_list = []
+        select_list = []
+        valid_list = []
+        value_list = []
         x, bl_val = baseline.unwrap_batch(batch)
         # x = dataset item: {"loc", "demand", "depot"}
         # bl_val = baseline values [B]
         x = move_to(x, opts.device)
         ep_step = 0  #
-        while x["loc"].nonzero().nelement() !=0 and ep_step < opts.graph_size: 
+        valid_mask = torch.ones(opts.batch_size, opts.graph_size, dtype=torch.bool, device=opts.device)
+        depot_mask = torch.ones(opts.batch_size, 1, dtype=torch.bool, device=opts.device)
+        traj = Trajectory()
+        while x["loc"].nonzero().nelement() != 0 and ep_step < opts.graph_size:
             bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
-            logits, mask = knapsack_model(x) # mask: 1 = include, 0 = exclude
-            subgraph, x = get_subgraph(x, mask)#
+            src_pad_mask = torch.cat([depot_mask, valid_mask], dim=1)
+            logits, select_mask, value = knapsack_alg.agent(x, src_pad_mask)  # mask: 1 = include, 0 = exclude
+            subgraph, x = get_subgraph(x, select_mask)  #
             cost = train_batch(
-                model, optimizer, baseline, epoch, batch_id, step, subgraph, bl_val, tb_logger, opts #
+                model, optimizer, baseline, epoch, batch_id, step, subgraph, bl_val, tb_logger, opts  #
             )
+            traj.append("obs", x)
+            traj.append("logits", logits[:, 1:])
+            traj.append("costs", cost)
+            traj.append("values", value)
+            traj.append("actions", select_mask)
+            traj.append("valid", valid_mask.clone())
 
-            penalty = 1.0
-#             print(mask)
-            if mask[mask==1.0].nelement() == 0: 
-#                 print("PENALTY")
-                penalty = 10.0
-            masked_logits_list.append(torch.cat((torch.ones(logits.shape[0], 1, 1).to(logits), mask*logits[:,1:,:]), dim = 1)) #
-            cost_list.append(cost+penalty)
-            reg_list.append((-1)*logp_nonzero(logits[:,1:,:], dim = 1))#
-            ep_step += 1 #
-        data_mask = torch.stack(masked_logits_list, dim = 0) #
-        data_cost = torch.stack(cost_list, dim = 0) #
-        reg_value = torch.stack(reg_list, dim = 0)
-        knapsack_loss = (data_cost*data_mask.sum(2).squeeze()).mean() + reg_value.mean()
-#         print('REG ',reg_value.mean())
-#         print('KNP ',(data_cost*data_mask.sum(2).squeeze()).mean())
-        knapsack_optimizer.zero_grad()
-        knapsack_loss.backward()
-        # Clip gradient norms and get (clipped) gradient norms for logging
-        grad_norms = clip_grad_norms(knapsack_optimizer.param_groups, opts.max_grad_norm)
-        knapsack_optimizer.step()
-        wandb.log({"knapsack_loss": knapsack_loss.item()}, step=step)
-        wandb.log({"knapsack_avg_cost": data_cost.mean().item()}, step=step)
-        wandb.log({"reg_value": reg_value.mean().item()}, step=step)
+            valid_mask = valid_mask * torch.logical_not(select_mask)
+            ep_step += 1  #
 
-
+        knapsack_alg.update(traj)
         step += 1
+        assert (knapsack_alg.step == step)
 
     epoch_duration = time.time() - start_time
     print(
@@ -197,13 +161,13 @@ def train_epoch(
     )
 
     if (
-        opts.checkpoint_epochs != 0 and epoch % opts.checkpoint_epochs == 0
+            opts.checkpoint_epochs != 0 and epoch % opts.checkpoint_epochs == 0
     ) or epoch == opts.n_epochs - 1:
         print("Saving model and state...")
         torch.save(
             {
                 "model": get_inner_model(model).state_dict(),
-                "knapsack_model": get_inner_model(knapsack_model).state_dict(),
+                "knapsack_model": get_inner_model(knapsack_alg.agent).state_dict(),
                 "optimizer": optimizer.state_dict(),
                 "rng_state": torch.get_rng_state(),
                 "cuda_rng_state": torch.cuda.get_rng_state_all(),
@@ -212,7 +176,7 @@ def train_epoch(
             os.path.join(opts.save_dir, "epoch-{}.pt".format(epoch)),
         )
 
-    avg_reward = validate(model, knapsack_model, val_dataset, opts)
+    avg_reward = validate(model, knapsack_alg.agent, val_dataset, opts)
     print(avg_reward)
     wandb.log({"val_avg_reward": avg_reward}, step=step)
     if not opts.no_tensorboard:

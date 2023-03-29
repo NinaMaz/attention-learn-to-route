@@ -1,3 +1,5 @@
+import math
+
 import torch
 import numpy as np
 import os
@@ -221,21 +223,46 @@ def sample_many(inner_func, get_cost_func, input, batch_rep=1, iter_rep=1):
     return minpis, mincosts
 
 def get_subgraph(data, mask):
-    #mask: tensor of shape [Data_size, GS + 1, 1]
+    #mask: tensor of shape [Data_size, GS + 1]
     #mask_wo_depot = mask[:,1:,:]
-
     masked_subgraph = {
-        "loc": torch.mul(data["loc"],mask),
+        "loc": torch.mul(data["loc"],mask.unsqueeze(-1)),
                     # Uniform 1 - 9, scaled by capacities
-        "demand": data["demand"]*mask.squeeze(-1),
+        "demand": data["demand"]*mask,
         "depot": data["depot"]
     }
 
     new_data = {
-        "loc": torch.mul(data["loc"], torch.logical_not(mask)),
+        "loc": torch.mul(data["loc"], torch.logical_not(mask.unsqueeze(-1))),
         # Uniform 1 - 9, scaled by capacities
-        "demand": data["demand"] * torch.logical_not(mask).squeeze(-1),
+        "demand": data["demand"] * torch.logical_not(mask),
         "depot": data["depot"]
     }
 
     return masked_subgraph, new_data
+
+
+def clip_grad_norms(param_groups, max_norm=math.inf):
+    """
+    Clips the norms for all param groups to max_norm
+    and returns gradient norms before clipping.
+    :param optimizer:
+    :param max_norm:
+    :param gradient_norms_log:
+    :return: grad_norms, clipped_grad_norms: list with (clipped)
+    gradient norms per group
+    """
+    grad_norms = [
+        torch.nn.utils.clip_grad_norm_(
+            group["params"],
+            max_norm
+            if max_norm > 0
+            else math.inf,  # Inf so no clipping but still call to calc
+            norm_type=2,
+        )
+        for group in param_groups
+    ]
+    grad_norms_clipped = (
+        [min(g_norm, max_norm) for g_norm in grad_norms] if max_norm > 0 else grad_norms
+    )
+    return grad_norms, grad_norms_clipped

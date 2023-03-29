@@ -32,7 +32,8 @@ class KnapsackModel(torch.nn.Module):
         embeddings, _ = self.embedder(self._init_embed(input))  # [batch_size, n_nodes, dim]
         logits = self.layers(embeddings)  # [batch_size, n_nodes, dim]
         #rand_var = torch.bernoulli(torch.ones_like(input)*bernoulli_prob)
-        mask, _ = sample_nonzero(logits[:,1:,:], dim = 1)
+        logits = logits.squeeze(2)
+        mask, _ = sample_nonzero(logits[:,1:], dim = 1)
         return logits, mask
 
     def _init_embed(self, input):
@@ -95,11 +96,12 @@ class KnapsackModelAC(torch.nn.Module):
 
     def forward(self, input, mask):
         # loc: [B, N, 2], depot: [B, 2], demand: [B, N]
-        embeddings, _ = self.embedder(self._init_embed(input), mask)  # [batch_size, n_nodes, dim]
+        embeddings, _ = self.embedder(self._init_embed(input), mask)  # [batch_size, n_nodes, dim], [batch_size, n_nodes]
         logits = self.policy_layers(embeddings)  # [batch_size, n_nodes, 1]
         value = self.val_layers(embeddings.mean(dim=1)) # [batch_size, 1]
         #rand_var = torch.bernoulli(torch.ones_like(input)*bernoulli_prob)
-        mask, _ = sample_nonzero(logits[:,1:,:], dim = 1)
+        logits, value = logits.squeeze(2), value.squeeze(1)
+        mask, _ = sample_nonzero(logits[:,1:], dim = 1)
         return logits, mask, value
 
     def _init_embed(self, input):

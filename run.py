@@ -9,8 +9,7 @@ import torch
 import torch.optim as optim
 
 from nets.critic_network import CriticNetwork
-from train import train_epoch, validate, get_inner_model
-from train_ac import train_epoch_ac
+from train import validate, get_inner_model, train_epoch
 from reinforce_baselines import (
     NoBaseline,
     ExponentialBaseline,
@@ -23,13 +22,19 @@ from nets.pointer_network import PointerNetwork, CriticNetworkLSTM
 from utils import torch_load_cpu, load_problem
 from utils.replay_buffer import ReplayBuffer
 from nets.knapsack_agent import KnapsackModel, KnapsackModelAC
+from algorithms import AC, PPO
 
 __spec__ = None  # for tracing with pdb
 
 
 def run(opts):
 
-    wandb.init(name=opts.run_name, project="SbRLCO")
+    wandb.init(name=opts.run_name, project="SbRLCO",
+       settings= {
+           "_disable_stats": True,
+           "system_sample_seconds": 999999999,
+           # "disabled": True
+       })
     # Pretty print the run args
     pp.pprint(vars(opts))
 
@@ -72,11 +77,8 @@ def run(opts):
     if load_path is not None:
         print("  [*] Loading data from {}".format(load_path))
         load_data = torch_load_cpu(load_path)
-    if opts.knapsack_agent == "actor-critic":
-        knpsck_model = KnapsackModelAC(opts.embedding_dim, n_encode_layers=opts.n_encode_layers,
-                                     normalization=opts.normalization).to(opts.device)
-    else:
-        knpsck_model = KnapsackModel(opts.embedding_dim, n_encode_layers=opts.n_encode_layers, normalization=opts.normalization).to(opts.device)
+    knpsck_model = KnapsackModelAC(opts.embedding_dim, n_encode_layers=opts.n_encode_layers,
+                                   normalization=opts.normalization).to(opts.device)
     if problem.NAME == 'cvrp':
         buffer = ReplayBuffer(
             opts.buffer_size,
@@ -215,38 +217,31 @@ def run(opts):
     avg_reward = validate(model, knpsck_model, val_dataset, opts)
     wandb.log({"val_avg_reward": avg_reward}, step=0)
 
+    if opts.knapsack_alg == "ac":
+        knpsck_alg = AC(knpsck_model, knpsck_optimizer, opts.loss_weights, opts.max_grad_norm,
+                        0.99, opts.symmetric_force)
+    elif opts.knapsack_alg == "ppo":
+        knpsck_alg = PPO(knpsck_model, knpsck_optimizer, opts.loss_weights, opts.max_grad_norm,
+                        0.99, opts.symmetric_force, 0.1,
+                        0.2, 10, torch.ones(1, 1, dtype=torch.bool, device=opts.device))
+    else:
+        raise NotImplementedError("Currently supported algorithms: 'ac', 'ppo'")
+
     if not opts.eval_only:
         for epoch in range(opts.epoch_start, opts.epoch_start + opts.n_epochs):
-            if opts.knapsack_agent == "actor-critic":
-                train_epoch_ac(
-                    model,
-                    knpsck_model,
-                    optimizer,
-                    knpsck_optimizer,
-                    baseline,
-                    lr_scheduler,
-                    knpsck_lr_scheduler,
-                    epoch,
-                    val_dataset,
-                    problem,
-                    tb_logger,
-                    opts,
-                )
-            else:
-                train_epoch(
-                    model,
-                    knpsck_model,
-                    optimizer,
-                    knpsck_optimizer,
-                    baseline,
-                    lr_scheduler,
-                    knpsck_lr_scheduler,
-                    epoch,
-                    val_dataset,
-                    problem,
-                    tb_logger,
-                    opts,
-                )
+            train_epoch(
+                model,
+                knpsck_alg,
+                optimizer,
+                baseline,
+                lr_scheduler,
+                knpsck_lr_scheduler,
+                epoch,
+                val_dataset,
+                problem,
+                tb_logger,
+                opts,
+            )
 
 
 if __name__ == "__main__":
