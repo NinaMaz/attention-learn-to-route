@@ -49,7 +49,6 @@ class PPO(AlgBase):
         # compute qvalues based on rewards and predicted values of the next state
         advantage = (qvalues - values) * not_done  # [N]
 
-        log_probs = F.logsigmoid(logits)  # [N, Nn]
         probs = torch.sigmoid(logits) # [N, Nn]
 
         # policy grad loss
