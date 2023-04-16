@@ -240,7 +240,7 @@ class GraphAttentionEncoderMask(nn.Module):
         ])
 
 
-    def forward(self, x, mask=None):
+    def forward(self, x, mask, **kwargs):
         # Batch multiply to get initial embeddings of nodes
         h = (
             self.init_embed(x.view(-1, x.size(-1))).view(*x.size()[:2], -1)

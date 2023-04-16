@@ -17,6 +17,9 @@ def get_options(args=None):
     parser.add_argument(
         "--knapsack_alg", default="ac", help="Agent. ac and ppo are supported"
     )
+    parser.add_argument(
+        "--knapsack_enc", default="GraphAttentionEncoderMask", help="Encoder class for Knapsack."
+    )
     parser.add_argument("--symmetric_force", action=argparse.BooleanOptionalAction,
                         help="Whether to pass grads from selected actions only")
 
@@ -226,7 +229,7 @@ def get_options(args=None):
     opts = parser.parse_args(args)
 
     opts.use_cuda = torch.cuda.is_available() and not opts.no_cuda
-    opts.run_name = "{}_{}".format(opts.run_name, time.strftime("%Y%m%dT%H%M%S"))
+    opts.run_name = "{}_{}".format(opts.run_name, time.strftime("%Y-%m-%d %H:%M:%S"))
     opts.save_dir = os.path.join(
         opts.output_dir, "{}_{}".format(opts.problem, opts.graph_size), opts.run_name
     )

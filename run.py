@@ -21,7 +21,7 @@ from nets.attention_model import AttentionModel
 from nets.pointer_network import PointerNetwork, CriticNetworkLSTM
 from utils import torch_load_cpu, load_problem
 from utils.replay_buffer import ReplayBuffer
-from nets.knapsack_agent import KnapsackModel, KnapsackModelAC
+from nets.knapsack_agent import KnapsackModelAC
 from algorithms import AC, PPO
 
 __spec__ = None  # for tracing with pdb
@@ -78,7 +78,7 @@ def run(opts):
         print("  [*] Loading data from {}".format(load_path))
         load_data = torch_load_cpu(load_path)
     knpsck_model = KnapsackModelAC(opts.embedding_dim, n_encode_layers=opts.n_encode_layers,
-                                   normalization=opts.normalization).to(opts.device)
+                                   normalization=opts.normalization, encoder_cls=opts.knapsack_enc).to(opts.device)
     if problem.NAME == 'cvrp':
         buffer = ReplayBuffer(
             opts.buffer_size,
