@@ -257,5 +257,5 @@ class GraphAttentionEncoderMask(nn.Module):
             # node embeddings (batch_size, graph_size, embed_dim)
             h,
             # average to get embedding of graph, (batch_size, embed_dim)
-            h.sum(dim=1) / mask.count_nonzero(dim=1).view(-1, 1)
+            h.sum(dim=1) / np.sqrt(h.size(1))
         )

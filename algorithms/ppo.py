@@ -65,7 +65,7 @@ class PPO(AlgBase):
         ).sum() / num_valid
         # policy loss
         adv = advantage.unsqueeze(-1).detach()
-        ratio = probs / old_probs * valid * force # [N, Nn]
+        ratio = probs / (old_probs + 1e-8) * valid * force # [N, Nn]
         obj = ratio * adv
         obj2 = torch.clamp(ratio, 1 - eps, 1 + eps) * adv
         clip_loss = torch.min(obj, obj2).sum() / num_valid

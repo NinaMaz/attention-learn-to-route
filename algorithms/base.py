@@ -36,4 +36,5 @@ class AlgBase:
         wandb.log({"avg_action_prob": (torch.sigmoid(logits) * valid).sum() / valid.count_nonzero()},
                   step=self.step)
         wandb.log({"Step": self.step}, step=self.step)
+        wandb.log({"Example": valid.shape[1] * self.step}, step=self.step)
         self.step += 1

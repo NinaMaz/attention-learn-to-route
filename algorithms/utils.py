@@ -44,7 +44,7 @@ class Trajectory:
     def append(self, key, value):
         if isinstance(value, dict):
             value = TensorDict(value)
-        self._data[key].append(value)
+        self._data[key].append(value.clone())
 
 
 
@@ -66,6 +66,11 @@ class Sampler:
 
 
 class TensorDict(dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for k,v in self.items():
+            super().__setitem__(k, v.clone())
+
     def __repr__(self):
         return f"TensorDict({dict(self)})"
 

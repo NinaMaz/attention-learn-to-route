@@ -17,7 +17,7 @@ def sample_nonzero(
         remaining = to_draw.expand_as(sample)
         n_draws[to_draw] += 1
         if n_draws[to_draw][0] > N_TRIALS:
-            ix0 = to_draw.squeeze().nonzero()[...,0]
+            ix0 = to_draw.squeeze().nonzero(as_tuple=True)[0]
             ix1 = torch.multinomial(probs[ix0], 1)[...,0]
             sample[ix0, ix1] = True
         else:

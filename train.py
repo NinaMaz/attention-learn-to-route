@@ -47,7 +47,8 @@ def rollout(model, dataset, opts, knapsack_model = None):
                 cost = 0
                 valid_mask = torch.ones(bat["loc"].shape[0], opts.graph_size, dtype=torch.bool, device=opts.device)
                 depot_mask = torch.ones(bat["loc"].shape[0], 1, dtype=torch.bool, device=opts.device)
-                while bat["loc"].nonzero().nelement() !=0 and ep_step < opts.graph_size:
+                while bat["loc"].nonzero().nelement() !=0:
+                    assert (ep_step < opts.graph_size)
                     src_pad_mask = torch.cat([depot_mask, valid_mask], dim=1)
                     logits, mask, *_ = knapsack_model(move_to(bat, opts.device), src_pad_mask)
                     valid_mask = valid_mask * torch.logical_not(mask)
@@ -117,12 +118,6 @@ def train_epoch(
     for batch_id, batch in enumerate(
             tqdm(training_dataloader, disable=opts.no_progress_bar)
     ):
-
-        logits_list = []  #
-        cost_list = []
-        select_list = []
-        valid_list = []
-        value_list = []
         x, bl_val = baseline.unwrap_batch(batch)
         # x = dataset item: {"loc", "demand", "depot"}
         # bl_val = baseline values [B]
@@ -131,20 +126,21 @@ def train_epoch(
         valid_mask = torch.ones(opts.batch_size, opts.graph_size, dtype=torch.bool, device=opts.device)
         depot_mask = torch.ones(opts.batch_size, 1, dtype=torch.bool, device=opts.device)
         traj = Trajectory()
-        while x["loc"].nonzero().nelement() != 0 and ep_step < opts.graph_size:
+        while x["loc"].nonzero().nelement() != 0:
+            assert (ep_step < opts.graph_size)
             bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
             src_pad_mask = torch.cat([depot_mask, valid_mask], dim=1)
             logits, select_mask, value = knapsack_alg.agent(x, src_pad_mask)  # mask: 1 = include, 0 = exclude
+            traj.append("obs", x)
             subgraph, x = get_subgraph(x, select_mask)  #
             cost = train_batch(
                 model, optimizer, baseline, epoch, batch_id, step, subgraph, bl_val, tb_logger, opts  #
             )
-            traj.append("obs", x)
             traj.append("logits", logits[:, 1:])
             traj.append("costs", cost)
             traj.append("values", value)
             traj.append("actions", select_mask)
-            traj.append("valid", valid_mask.clone())
+            traj.append("valid", valid_mask)
 
             valid_mask = valid_mask * torch.logical_not(select_mask)
             ep_step += 1  #
