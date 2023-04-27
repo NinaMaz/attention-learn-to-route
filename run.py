@@ -35,6 +35,7 @@ def run(opts):
            "system_sample_seconds": 999999999,
            # "disabled": True
        })
+    wandb.define_metric("val_avg_reward", summary="min")
     # Pretty print the run args
     pp.pprint(vars(opts))
 

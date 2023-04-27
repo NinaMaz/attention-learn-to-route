@@ -22,7 +22,8 @@ class GATEncoder(GAT):
 
         # if k is none, select it according to the graph size
         if self.k is None:
-            self.k = int(np.ceil(np.sqrt(n_nodes)))
+            self.k = 10 * int(np.ceil(np.log(n_nodes)/np.log(10)))
+            print(f"Number of nearest neighbors K is set to {self.k}")
 
         loc, depot = obs['loc'], obs['depot'] # (batch_size, n_nodes-1, 2), (batch_size, 2)
         loc = torch.cat([depot.view(-1, 1, 2), loc], dim=1) # (batch_size, n_nodes, 2)

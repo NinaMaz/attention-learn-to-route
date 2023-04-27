@@ -11,7 +11,7 @@ from torch.nn import DataParallel
 from algorithms.utils import Trajectory
 from nets.attention_model import set_decode_type
 from utils.log_utils import log_values
-from utils import move_to, get_subgraph, clip_grad_norms
+from utils import move_to, get_subgraph, clip_grad_norms, ReplayBuffer
 
 
 def get_inner_model(model):
@@ -133,9 +133,14 @@ def train_epoch(
             logits, select_mask, value = knapsack_alg.agent(x, src_pad_mask)  # mask: 1 = include, 0 = exclude
             traj.append("obs", x)
             subgraph, x = get_subgraph(x, select_mask)  #
-            cost = train_batch(
-                model, optimizer, baseline, epoch, batch_id, step, subgraph, bl_val, tb_logger, opts  #
-            )
+            if opts.lr_model > 0:
+                cost = train_batch(
+                    model, optimizer, baseline, epoch, batch_id, step, subgraph, bl_val, tb_logger, opts  #
+                )
+            else:
+                model.eval()
+                with torch.no_grad():
+                    cost, _, _, _ = model(subgraph)
             traj.append("logits", logits[:, 1:])
             traj.append("costs", cost)
             traj.append("values", value)
@@ -147,7 +152,9 @@ def train_epoch(
 
         knapsack_alg.update(traj)
         step += 1
-        assert (knapsack_alg.step == step)
+        # print total gpu memory usage
+        wandb.log({"gpu_memory_allocated, GB": torch.cuda.memory_allocated(opts.device) / 1e9}, step=step)
+        wandb.log({"gpu_memory_reserved, GB": torch.cuda.memory_reserved(opts.device) / 1e9}, step=step)
 
     epoch_duration = time.time() - start_time
     print(
@@ -155,25 +162,25 @@ def train_epoch(
             epoch, time.strftime("%H:%M:%S", time.gmtime(epoch_duration))
         )
     )
-
+    avg_reward = validate(model, knapsack_alg.agent, val_dataset, opts)
     if (
             opts.checkpoint_epochs != 0 and epoch % opts.checkpoint_epochs == 0
     ) or epoch == opts.n_epochs - 1:
-        print("Saving model and state...")
-        torch.save(
-            {
-                "model": get_inner_model(model).state_dict(),
-                "knapsack_model": get_inner_model(knapsack_alg.agent).state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "rng_state": torch.get_rng_state(),
-                "cuda_rng_state": torch.cuda.get_rng_state_all(),
-                "baseline": baseline.state_dict(),
-            },
-            os.path.join(opts.save_dir, "epoch-{}.pt".format(epoch)),
-        )
+        summary = wandb.run.summary.get("val_avg_reward")
+        if summary is None or summary["min"] >= avg_reward:
+            print("Saving model and state...")
+            torch.save(
+                {
+                    "model": get_inner_model(model).state_dict(),
+                    "knapsack_model": get_inner_model(knapsack_alg.agent).state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "rng_state": torch.get_rng_state(),
+                    "cuda_rng_state": torch.cuda.get_rng_state_all(),
+                    "baseline": baseline.state_dict(),
+                },
+                os.path.join(opts.save_dir, "best_checkpoint.pt".format(epoch)),
+            )
 
-    avg_reward = validate(model, knapsack_alg.agent, val_dataset, opts)
-    print(avg_reward)
     wandb.log({"val_avg_reward": avg_reward}, step=step)
     if not opts.no_tensorboard:
         tb_logger.log_value("val_avg_reward", avg_reward, step)
