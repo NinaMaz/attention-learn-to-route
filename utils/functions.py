@@ -223,12 +223,20 @@ def sample_many(inner_func, get_cost_func, input, batch_rep=1, iter_rep=1):
     return minpis, mincosts
 
 def get_subgraph(data, mask):
-    #mask: tensor of shape [Data_size, GS + 1]
-    #mask_wo_depot = mask[:,1:,:]
-    masked_subgraph = {
+    # mask: (batch_size, graph_size)
+    subgraph = {
         "loc": torch.mul(data["loc"],mask.unsqueeze(-1)),
                     # Uniform 1 - 9, scaled by capacities
         "demand": data["demand"]*mask,
+        "depot": data["depot"]
+    }
+    # pack selected nodes tightly
+    num_1_max = mask.sum(dim=1).max()
+    sorted_mask, sorted_idx = torch.sort(mask.to(torch.uint8), dim=1, descending=True)
+    sorted_idx = sorted_idx[:, :num_1_max]
+    subgraph = {
+        "loc": torch.gather(subgraph["loc"], dim=1, index=sorted_idx.unsqueeze(-1).expand(-1,-1, 2)),
+        "demand": torch.gather(subgraph["demand"], dim=1, index=sorted_idx),
         "depot": data["depot"]
     }
 
@@ -239,7 +247,7 @@ def get_subgraph(data, mask):
         "depot": data["depot"]
     }
 
-    return masked_subgraph, new_data
+    return subgraph, new_data
 
 
 def clip_grad_norms(param_groups, max_norm=math.inf):

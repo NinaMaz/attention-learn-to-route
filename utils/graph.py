@@ -2,12 +2,12 @@ import torch
 
 
 
-
 def batch_knn_graph(loc: torch.Tensor, k: int, valid: torch.Tensor = None):
     """
-    Given locations "loc" - torch.tensor of shape [batch_size, num_nodes, 2]
-    constructs edges of a directed graph such that every node is connected to its "k" nearest neighbours.
+    Given locations "loc" - torch.Tensor of shape [batch_size, num_nodes, 2]
+    constructs edges to each node from its k nearest neighbors.
     Merge graphs in a batch into a large graph as subgraphs.
+    Node labels are integers chosen so that each node (even not valid) in the large graph is unique.
 
     Args:
     - loc: tensor of shape [batch_size, num_nodes, 2], representing the locations of each node in 2D space.
@@ -21,19 +21,23 @@ def batch_knn_graph(loc: torch.Tensor, k: int, valid: torch.Tensor = None):
     # loc: [Bs, Nn, 2], valid: [Bs, Nn]
     Bs, Nn, _ = loc.size()
     device = loc.device
-    if valid is not None:
-        loc = torch.where(valid.view(Bs, Nn, 1), loc, torch.inf)
     # Compute pairwise distances between nodes
     dists = torch.cdist(loc, loc) # [Bs, Nn, Nn]
     dists.diagonal(dim1=1, dim2=2).fill_(torch.inf)
+    dists.masked_fill_(~valid.view(Bs, 1, Nn), torch.inf)
+    dists.masked_fill_(~valid.view(Bs, Nn, 1), torch.inf)
     # Find the indices of the k nearest neighbors for each node
-    top_dists, indices = torch.topk(dists, k=k, largest=False) # [Bs, Nn, k]
+    # top_dists, indices = torch.topk(dists, k=k, largest=False) # [Bs, Nn, k]
+    # WARNING: topk produces incorrect results in Pytorch1.13!!! https://github.com/pytorch/pytorch/issues/95455
+    dists, indices = torch.sort(dists)
+    top_dists, indices = dists[...,:k].contiguous(), indices[...,:k]
     # Create an edge tensor by stacking pairs of nodes that are k-nearest neighbors
     targets = torch.arange(Nn, device=device).view(1, -1, 1).expand_as(indices)
+    # print(targets)
     edge_index = torch.stack([indices.reshape(Bs, -1),
                               targets.reshape(Bs, -1)], dim=0) # [2, Bs, Ne], Ne = Nn * k
     # Merging into large graph
-    offset = (torch.arange(Bs, device=device) * Nn).view(1, -1, 1)
+    offset = (torch.arange(Bs, device=device) * Nn).view(1, -1, 1) # [1, Bs, 1]
     edge_index += offset
     # Filtering inf and nan (not valid edges)
     valid_edges = top_dists.view(Bs, -1) < torch.inf
@@ -41,89 +45,49 @@ def batch_knn_graph(loc: torch.Tensor, k: int, valid: torch.Tensor = None):
     return edge_index
 
 
-
-def complete_bipartite_graph(g1_nodes, g2_nodes):
+@torch.jit.script
+def batch_complete_bipartite_graph(g1_valid: torch.Tensor, g2_valid: torch.Tensor):
     """
-    Given nodes of two graphs, constructs edges of a directed graph such that every node in the first graph
-    is connected to every node in the second graph.
+    For each element of batch: given nodes of two graphs, constructs edges of a directed graph such that every node in
+    the first graph is connected to every node in the second graph. Merge graphs in a batch into a large graph.
+    Node labels are integers chosen so that each node (even not valid) in the large graph is unique.
 
     Args:
-    - g1_nodes: tensor of shape [num_nodes_g1]
-    - g2_nodes: tensor of shape [num_nodes_g2]
+    - g1_valid: tensor of shape [batch_size, num_nodes_g1]
+    - g2_valid: tensor of shape [batch_size, num_nodes_g2]
 
     Returns:
     - edge_index: tensor of shape [2, num_edges]
     """
-    g1_nodes = g1_nodes.view(-1, 1).expand(-1, g2_nodes.size(0))
-    g2_nodes = g2_nodes.view(1, -1).expand(g1_nodes.size(0), -1)
-    edge_index = torch.stack([g1_nodes.reshape(-1), g2_nodes.reshape(-1)], dim=0)
+    Bs, Nn1 = g1_valid.size(0), g1_valid.size(1)
+    Nn2 = g2_valid.size(1)
+    nodes = torch.arange(Bs*(Nn1+Nn2), device=g1_valid.device).view(Bs, Nn1+Nn2)
+    g1_nodes = nodes[:, :Nn1].view(Bs, -1, 1).expand(Bs, Nn1, Nn2)
+    g2_nodes = nodes[:, Nn1:].view(Bs, 1, -1).expand(Bs, Nn1, Nn2)
+    g1_valid = g1_valid.view(Bs, -1, 1).expand(Bs, Nn1, Nn2)
+    g2_valid = g2_valid.view(Bs, 1, -1).expand(Bs, Nn1, Nn2)
+    valid = torch.stack([g1_valid.reshape(Bs, -1), g2_valid.reshape(Bs, -1)], dim=-1).all(-1) # [Bs, Nn1 * Nn2]
+    all_edges = torch.stack([g1_nodes.reshape(Bs, -1), g2_nodes.reshape(Bs, -1)], dim=0) # [2, Bs, Nn1 * Nn2]
+    edge_index = all_edges[:, valid] # [2, Ne]
     return edge_index
 
 
 
 
 if __name__ == '__main__':
-    # Define a simple 3-node graph with (x, y) coordinates
-    loc = torch.tensor([[[0, 0], [1, 1], [2, 2], [3, 3], [4, 4]]], dtype=torch.float).to("cuda:1")
-    loc = torch.cat([loc, loc], dim=0)
-
-    # valid = (torch.randn(loc.shape[:2]) > 0).to("cuda:1")
-    valid = torch.ones(loc.shape[:2], dtype=torch.bool).to("cuda:1")
-    valid[0, 1] = False
-    valid[1] = False
-    valid[1,0] = True
-    valid[1,3] = True
-    print(valid)
-
-    # Compute edges connecting each node to its 2 nearest neighbors
-    # k = loc.shape[1] // 10
-    k = 2
-
-    edge_index = batch_knn_graph(loc, k)
-    print(edge_index.is_contiguous())
-    print(edge_index)
-
-    edge_index = batch_knn_graph(loc, k, valid)
-    print(edge_index.is_contiguous())
-    print(edge_index)
-    # assert((edge_index == edge_index2).all())
-
-
-
-    # loc = torch.randn(1000, 1000, 2).to("cuda:1")
-    # # valid = (torch.randn(1000, 1000) > 0).to("cuda:1")
-    # k = 100
-    # from torch.utils.benchmark import Timer
-    # timer = Timer(
-    #     stmt="my_function(loc, k)",
-    #     globals={"my_function": batch_knn_graph, "loc": loc, "k": k}
-    # )
-    # mean_execution_time = timer.timeit(50).mean
-    # print("Mean execution time:", mean_execution_time)
-
-
-    # test complete_bipartite_graph
-    g1_labels = torch.tensor([0, 1, 2, 3])
-    g2_labels = torch.tensor([4, 5, 6])
-    edge_index = complete_bipartite_graph(g1_labels, g2_labels)
-    print(edge_index)
-
-
-    # test all together
-    print("TEST")
-
-    loc = torch.randint(3, (2, 7, 2)).to("cuda:1")
-    mask = (torch.randn(loc.shape[:2]) > 0).to("cuda:1")
-    print(loc)
-    print(mask)
-    batch_size, n_nodes, _ = loc.shape
-    mask_no_depot = torch.cat([torch.zeros(batch_size, 1, dtype=mask.dtype, device=loc.device), mask[:, 1:]], dim=1)
-    depot_nodes = torch.arange(batch_size, device=loc.device) * n_nodes  # (batch_size)
-    valid_nodes = mask_no_depot.view(-1).nonzero(as_tuple=False)  # (n_valid_nodes)
-    edge_indices = [batch_knn_graph(loc, k=3, valid=mask_no_depot)]
-    edge_indices += [complete_bipartite_graph(depot_nodes, valid_nodes)]
-    edge_indices += [complete_bipartite_graph(valid_nodes, depot_nodes)]
-    edge_index = torch.cat(edge_indices, dim=1)  # (2, n_edges)
-    # for t in edge_indices:
-    #     print(t)
+    torch.manual_seed(123)
+    Bs, Nn = 2, 6
+    loc = torch.randint(3, (Bs, Nn+1, 2), dtype=torch.float32).to("cuda:1")
+    mask = torch.randn((Bs, Nn), device=loc.device) > 0.5
+    depot_mask = torch.ones((Bs, 1), dtype=torch.bool, device=loc.device)
+    print("loc:\n", loc)
+    print("valid:\n", mask)
+    mask_no_depot = torch.cat([~depot_mask, mask], dim=1)
+    knn_edges = batch_knn_graph(loc, k=3, valid=mask_no_depot)
+    bi_edges1 = batch_complete_bipartite_graph(depot_mask, mask)
+    bi_edges2 = bi_edges1.flip(0)
+    print("knn_edges:\n", knn_edges)
+    print("bi_edges:\n", bi_edges1)
+    edge_index = torch.cat([knn_edges, bi_edges1, bi_edges2], dim=1)  # (2, n_edges)
+    print("all:\n", edge_index, end="\n"*5)
 

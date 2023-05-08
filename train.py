@@ -195,6 +195,22 @@ def train_epoch(
 def train_batch(
     model, optimizer, baseline, epoch, batch_id, step, x, bl_val, tb_logger, opts
 ):
+    graph_size = x["loc"].size(1)
+    if opts.problem == 'cvrp':
+        buffer = ReplayBuffer(
+            opts.buffer_size,
+            (graph_size + 1, opts.embedding_dim),
+            (graph_size + 1, opts.embedding_dim),
+            opts.device,
+        )
+    else:
+        buffer = ReplayBuffer(
+            opts.buffer_size,
+            (graph_size, opts.embedding_dim),
+            (graph_size, opts.embedding_dim),
+            opts.device,
+        )
+    model.buffer = buffer
     #x, bl_val = baseline.unwrap_batch(batch)
     #x = move_to(x, opts.device)
     #bl_val = move_to(bl_val, opts.device) if bl_val is not None else None

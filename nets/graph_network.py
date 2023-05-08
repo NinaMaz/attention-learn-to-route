@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import torch.nn as nn
-from utils.graph import batch_knn_graph, complete_bipartite_graph
+from utils.graph import batch_knn_graph, batch_complete_bipartite_graph
 from torch_geometric.nn.models import GAT
 
 
@@ -29,13 +29,10 @@ class GATEncoder(GAT):
         loc = torch.cat([depot.view(-1, 1, 2), loc], dim=1) # (batch_size, n_nodes, 2)
 
         # construct graph
-        mask_no_depot = torch.cat([torch.zeros(batch_size, 1, dtype=mask.dtype, device=loc.device), mask[:, 1:]], dim=1)
-        depot_nodes = torch.arange(batch_size, device=loc.device) * n_nodes # (batch_size)
-        valid_nodes = mask_no_depot.view(-1).nonzero(as_tuple=False) # (n_valid_nodes)
-        edge_indices = [batch_knn_graph(loc, k=self.k, valid=mask_no_depot)]
-        edge_indices += [complete_bipartite_graph(depot_nodes, valid_nodes)]
-        edge_indices += [complete_bipartite_graph(valid_nodes, depot_nodes)]
-        edge_index = torch.cat(edge_indices, dim=1) # (2, n_edges)
+        mask_no_depot = mask.index_fill(1, index=torch.tensor([0], device=mask.device), value=False)
+        knn_edges = batch_knn_graph(loc, k=self.k, valid=mask_no_depot)  # directed
+        depot_edges = batch_complete_bipartite_graph(mask[:, :1], mask[:, 1:])  # directed
+        edge_index = torch.cat([knn_edges, depot_edges, depot_edges.flip(0)], dim=1)  # (2, n_edges)
 
         # concat features x: (batch_size, n_nodes, feature_dim) -> (batch_size * n_nodes, feature_dim)
         x = x.view(-1, feature_dim)
@@ -66,7 +63,7 @@ if __name__ == '__main__':
     mask = (torch.randn(Bs, N) > 0).to(device=device)
     obs = {'loc': torch.randn(Bs, N-1, 2).to(device=device), 'depot': torch.randn(Bs, 2).to(device=device)}
 
-    g = GraphEncoder(n_heads, d, 2, 'sym', 5).to(device=device)
+    g = GATEncoder(n_heads, d, 2, 'sym', 5).to(device=device)
     x, g = g(obs, x, mask)
     print(x.shape, g.shape)
 

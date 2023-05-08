@@ -80,20 +80,6 @@ def run(opts):
         load_data = torch_load_cpu(load_path)
     knpsck_model = KnapsackModelAC(opts.embedding_dim, n_encode_layers=opts.n_encode_layers,
                                    normalization=opts.normalization, encoder_cls=opts.knapsack_enc).to(opts.device)
-    if problem.NAME == 'cvrp':
-        buffer = ReplayBuffer(
-            opts.buffer_size,
-            (opts.graph_size+1, opts.embedding_dim),
-            (opts.graph_size+1, opts.embedding_dim),
-            opts.device,
-        )
-    else:
-        buffer = ReplayBuffer(
-            opts.buffer_size,
-            (opts.graph_size, opts.embedding_dim),
-            (opts.graph_size, opts.embedding_dim),
-            opts.device,
-        )
     print(torch.cuda.device_count())
     # Initialize model
     model_class = {
@@ -112,7 +98,7 @@ def run(opts):
         tanh_clipping=opts.tanh_clipping,
         checkpoint_encoder=opts.checkpoint_encoder,
         shrink_size=opts.shrink_size,
-        buffer=buffer,
+        buffer=None,
         graph_size=opts.graph_size,
     ).to(opts.device)
 
