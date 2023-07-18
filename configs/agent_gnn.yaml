@@ -1,0 +1,59 @@
+baseline: rollout
+batch_size: 110
+eval_batch_size: 110
+bl_alpha: 0.05
+bl_warmup_epochs: 1
+buffer_size: 12000
+checkpoint_encoder: false
+checkpoint_epochs: 1
+data_distribution: null
+device: cuda:0
+embedding_dim: 128
+epoch_size: 76800
+epoch_start: 0
+eval_only: false
+exp_beta: 0.8
+graph_size: 100
+hidden_dim: 128
+knapsack:
+  alg: ppo
+  enc: AgentGNN
+  embedding_dim: null
+  lr: 0.0001
+  model_args:
+    input_dim: 3
+    hidden_dim: 32
+    out_dim: 128
+    dropout: 0.0
+    num_steps: 20
+    num_agents: 10
+    node_readout: true
+load_path: pretrained/good_buffer_cvrp_baseline_20230130T121646/epoch-99.pt
+log_dir: logs
+log_step: 50
+loss_weights:
+  - 1.0
+  - 1.0
+  - 0.0
+lr_critic: 0.0001
+lr_decay: 1.0
+lr_model: 0.0001
+max_grad_norm: 1.0
+model: attention
+n_encode_layers: 3
+n_epochs: 100
+no_cuda: false
+no_progress_bar: false
+no_tensorboard: true
+normalization: batch
+output_dir: outputs
+problem: cvrp
+resume: null
+run_name: cvrp1000_ppo_AgentGNN
+save_dir: outputs/cvrp_1000/cvrp1000_ppo_AgentGNN
+seed: 1234
+shrink_size: null
+symmetric_force: true
+tanh_clipping: 10.0
+val_dataset: null
+val_size: 10000
