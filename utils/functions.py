@@ -78,7 +78,7 @@ def load_args(filename):
     return args
 
 
-def load_model(path, epoch=None):
+def load_model(path, epoch=None, device = None):
     from nets.attention_model import AttentionModel
     from nets.pointer_network import PointerNetwork
 
@@ -210,3 +210,32 @@ def sample_many(inner_func, get_cost_func, input, batch_rep=1, iter_rep=1):
     minpis = pis[torch.arange(pis.size(0), out=argmincosts.new()), argmincosts]
 
     return minpis, mincosts
+
+def get_subroutes(input, device, pad_size = True):
+    """
+    Divides the input split into a list of subroutes (the depot ('0' node) is considered to be the division element).
+    If padding=True, then the resulting subroutes are padded to the same size,
+
+    Args:
+    input: 3-dim tensor \pi
+    """
+    
+    ind, _ = (input==0).nonzero(as_tuple = True)
+    ind = ind.to("cpu")
+    l = [input[i].tensor_split((input[i]==0).nonzero(as_tuple = True)[0].to("cpu"), dim = 0) for i in ind.unique()]
+    if pad_size:
+        #pad_size = max([j.shape[0] for i in l for j in i])
+        temp = []
+        for i in l:
+            batch_temp = []
+            for n,j in enumerate(i): 
+                if j.nonzero().nelement() != 0:
+                    if n == 0:
+                        batch_temp.append(F.pad(j, (1,pad_size - j.shape[0])))
+                    else:
+                        batch_temp.append(F.pad(j, (0,pad_size - j.shape[0] + 1)))
+            temp.append(batch_temp)
+        return temp
+
+    
+    return l

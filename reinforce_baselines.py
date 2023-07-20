@@ -140,16 +140,18 @@ class CriticBaseline(Baseline):
 
 
 class RolloutBaseline(Baseline):
-    def __init__(self, model, problem, opts, epoch=0):
+    def __init__(self, model, tsp_model, problem, opts, epoch=0):
         super(Baseline, self).__init__()
 
         self.problem = problem
         self.opts = opts
 
-        self._update_model(model, epoch)
+        self._update_model(model, tsp_model, epoch)
+        
 
-    def _update_model(self, model, epoch, dataset=None):
+    def _update_model(self, model, tsp_model, epoch, dataset=None):
         self.model = copy.deepcopy(model)
+        self.tsp_model = tsp_model
         # Always generate baseline dataset when updating model to prevent overfitting to the baseline dataset
 
         if dataset is not None:
@@ -175,7 +177,7 @@ class RolloutBaseline(Baseline):
         else:
             self.dataset = dataset
         print("Evaluating baseline model on evaluation dataset")
-        self.bl_vals = rollout(self.model, self.dataset, self.opts).cpu().numpy()
+        self.bl_vals = rollout(self.model, self.tsp_model, self.dataset, self.opts).cpu().numpy()
         self.mean = self.bl_vals.mean()
         self.epoch = epoch
 
@@ -184,7 +186,7 @@ class RolloutBaseline(Baseline):
         # Need to convert baseline to 2D to prevent converting to double, see
         # https://discuss.pytorch.org/t/dataloader-gives-double-instead-of-float/717/3
         return BaselineDataset(
-            dataset, rollout(self.model, dataset, self.opts).view(-1, 1)
+            dataset, rollout(self.model, self.tsp_model, dataset, self.opts).view(-1, 1)
         )
 
     def unwrap_batch(self, batch):
@@ -207,7 +209,7 @@ class RolloutBaseline(Baseline):
         :param epoch: The current epoch
         """
         print("Evaluating candidate model on evaluation dataset")
-        candidate_vals = rollout(model, self.dataset, self.opts).cpu().numpy()
+        candidate_vals = rollout(model, self.tsp_model, self.dataset, self.opts).cpu().numpy()
 
         candidate_mean = candidate_vals.mean()
 

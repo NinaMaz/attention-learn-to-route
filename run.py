@@ -2,6 +2,7 @@
 
 import os
 import json
+import wandb
 import pprint as pp
 
 import torch
@@ -19,12 +20,15 @@ from reinforce_baselines import (
 from nets.attention_model import AttentionModel
 from nets.pointer_network import PointerNetwork, CriticNetworkLSTM
 from utils import torch_load_cpu, load_problem
+from utils.functions import load_model
 
 __spec__ = None  # for tracing with pdb
 
 
 def run(opts):
-
+    
+    wandb.init(name='AM_basic', project='SbRLCO', mode="disabled")
+       
     # Pretty print the run args
     pp.pprint(vars(opts))
 
@@ -53,7 +57,8 @@ def run(opts):
     opts.device = torch.device("cuda:0" if opts.use_cuda else "cpu")
 
     # Figure out what's the problem
-    problem = load_problem(opts.problem)
+    problem_cvrp = load_problem(opts.problem)
+    problem_tsp = load_problem("tsp")
 
     # Load data from load_path
     load_data = {}
@@ -74,7 +79,20 @@ def run(opts):
     model = model_class(
         opts.embedding_dim,
         opts.hidden_dim,
-        problem,
+        problem_tsp,
+        n_encode_layers=opts.n_encode_layers,
+        mask_inner=True,
+        mask_logits=True,
+        normalization=opts.normalization,
+        tanh_clipping=opts.tanh_clipping,
+        checkpoint_encoder=opts.checkpoint_encoder,
+        shrink_size=opts.shrink_size,
+    ).to(opts.device)
+    
+    division_model = model_class(
+        opts.embedding_dim,
+        opts.hidden_dim,
+        problem_cvrp,
         n_encode_layers=opts.n_encode_layers,
         mask_inner=True,
         mask_logits=True,
@@ -86,11 +104,19 @@ def run(opts):
 
     if opts.use_cuda and torch.cuda.device_count() > 1:
         model = torch.nn.DataParallel(model)
+        division_model = torch.nn.DataParallel(division_model)
 
     # Overwrite model parameters by parameters to load
     model_ = get_inner_model(model)
-    model_.load_state_dict({**model_.state_dict(), **load_data.get("model", {})})
-
+    if opts.fixed_logist:
+        model, _ = load_model(opts.fixed_logist, device = opts.device)
+        model = model.to(opts.device)
+    wandb.watch(model)
+    
+    division_model_ = get_inner_model(division_model)
+    division_model_.load_state_dict({**division_model_.state_dict(), **load_data.get("division_model", {})})
+    wandb.watch(division_model_)
+    
     # Initialize baseline
     if opts.baseline == "exponential":
         baseline = ExponentialBaseline(opts.exp_beta)
@@ -116,7 +142,7 @@ def run(opts):
             ).to(opts.device)
         )
     elif opts.baseline == "rollout":
-        baseline = RolloutBaseline(model, problem, opts)
+        baseline = RolloutBaseline(division_model, model, problem_cvrp, opts)
     else:
         assert opts.baseline is None, "Unknown baseline: {}".format(opts.baseline)
         baseline = NoBaseline()
@@ -132,7 +158,7 @@ def run(opts):
 
     # Initialize optimizer
     optimizer = optim.Adam(
-        [{"params": model.parameters(), "lr": opts.lr_model}]
+        [{"params": division_model.parameters(), "lr": opts.lr_model}]
         + (
             [{"params": baseline.get_learnable_parameters(), "lr": opts.lr_critic}]
             if len(baseline.get_learnable_parameters()) > 0
@@ -155,7 +181,7 @@ def run(opts):
     )
 
     # Start the actual training loop
-    val_dataset = problem.make_dataset(
+    val_dataset = problem_cvrp.make_dataset(
         size=opts.graph_size,
         num_samples=opts.val_size,
         filename=opts.val_dataset,
@@ -173,22 +199,23 @@ def run(opts):
         # Set the random states
         # Dumping of state was done before epoch callback, so do that now (model
         #  is loaded)
-        baseline.epoch_callback(model, epoch_resume)
+        baseline.epoch_callback(division_model, epoch_resume)
         print("Resuming after {}".format(epoch_resume))
         opts.epoch_start = epoch_resume + 1
 
     if opts.eval_only:
-        validate(model, val_dataset, opts)
+        validate(division_model, val_dataset, opts)
     else:
         for epoch in range(opts.epoch_start, opts.epoch_start + opts.n_epochs):
             train_epoch(
+                division_model,
                 model,
                 optimizer,
                 baseline,
                 lr_scheduler,
                 epoch,
                 val_dataset,
-                problem,
+                problem_cvrp,
                 tb_logger,
                 opts,
             )
