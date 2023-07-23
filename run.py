@@ -4,6 +4,8 @@ import os
 import json
 import pprint as pp
 import wandb
+import sys
+from collections import defaultdict
 
 import torch
 import torch.optim as optim
@@ -23,21 +25,28 @@ from utils import torch_load_cpu, load_problem
 from utils.replay_buffer import ReplayBuffer
 from nets.knapsack_agent import KnapsackModelAC
 from algorithms import AC, PPO
+import yaml
+
+torch.autograd.set_detect_anomaly(True)
 
 __spec__ = None  # for tracing with pdb
 
 
 def run(opts):
-
-    wandb.init(name=opts.run_name, project="SbRLCO",
-       settings= {
+    wandb.init(
+        name=opts["run_name"],
+        project="SbRLCO",
+        config=opts,
+        settings= {
            "_disable_stats": True,
            "system_sample_seconds": 999999999,
            # "disabled": True
-       })
+        })
     wandb.define_metric("val_avg_reward", summary="min")
     # Pretty print the run args
-    pp.pprint(vars(opts))
+    # pp.pprint(vars(opts))
+    print(yaml.dump(opts))
+    opts = wandb.config
 
     # Set the random seed
     torch.manual_seed(opts.seed)
@@ -58,12 +67,7 @@ def run(opts):
     os.makedirs(opts.save_dir)
     # Save arguments so exact configuration can always be found
     with open(os.path.join(opts.save_dir, "args.json"), "w") as f:
-        json.dump(vars(opts), f, indent=True)
-
-    # Set the device
-    device = opts.device if opts.device is not None else "cpu"
-    opts.device = torch.device(device if opts.use_cuda else "cpu")
-    print(opts.device)
+        json.dump(dict(opts), f, indent=True)
 
 
     # Figure out what's the problem
@@ -71,15 +75,31 @@ def run(opts):
 
     # Load data from load_path
     load_data = {}
-    assert (
-        opts.load_path is None or opts.resume is None
-    ), "Only one of load path and resume can be given"
-    load_path = opts.load_path if opts.load_path is not None else opts.resume
+    load_path = opts.get("load_path") or opts.get("resume")
     if load_path is not None:
         print("  [*] Loading data from {}".format(load_path))
         load_data = torch_load_cpu(load_path)
-    knpsck_model = KnapsackModelAC(opts.embedding_dim, n_encode_layers=opts.n_encode_layers,
-                                   normalization=opts.normalization, encoder_cls=opts.knapsack_enc).to(opts.device)
+
+    # if opts.knapsack.enc == "AgentGNN":
+    #     encoder_params = {
+    #         "num_features": 3,
+    #         "hidden_units": 24,
+    #         "dropout": 0.0,
+    #         "num_steps": 50,
+    #         "num_agents": 50,
+    #         "node_readout": False,
+    #     }
+    # else:
+    #     encoder_params = {
+    #         "n_heads": 8,
+    #         "embed_dim": opts.knapsack_embedding_dim,
+    #         "n_layers": opts.n_encode_layers,
+    #         "normalization": opts.normalization,
+    #     }
+
+    knpsck_model = KnapsackModelAC(opts.knapsack["embedding_dim"],
+                                   encoder_cls=opts.knapsack["enc"],
+                                   encoder_params=opts.knapsack["model_args"]).to(opts.device)
     print(torch.cuda.device_count())
     # Initialize model
     model_class = {
@@ -158,7 +178,7 @@ def run(opts):
         )
     )
     knpsck_optimizer = optim.Adam(
-        [{"params": knpsck_model.parameters(), "lr": opts.lr_knapsack}]
+        [{"params": knpsck_model.parameters(), "lr": opts.knapsack["lr"]}]
     )
 
     # Load optimizer state
@@ -201,16 +221,16 @@ def run(opts):
         print("Resuming after {}".format(epoch_resume))
         opts.epoch_start = epoch_resume + 1
 
-    avg_reward = validate(model, knpsck_model, val_dataset, opts)
-    wandb.log({"val_avg_reward": avg_reward}, step=0)
+    # avg_reward = validate(model, knpsck_model, val_dataset, opts)
+    # wandb.log({"val_avg_reward": avg_reward}, step=0)
 
-    if opts.knapsack_alg == "ac":
+    if opts.knapsack["alg"] == "ac":
         knpsck_alg = AC(knpsck_model, knpsck_optimizer, opts.loss_weights, opts.max_grad_norm,
                         0.99, opts.symmetric_force)
-    elif opts.knapsack_alg == "ppo":
+    elif opts.knapsack["alg"] == "ppo":
         knpsck_alg = PPO(knpsck_model, knpsck_optimizer, opts.loss_weights, opts.max_grad_norm,
                         0.99, opts.symmetric_force, 0.1,
-                        0.2, 10, torch.ones(1, 1, dtype=torch.bool, device=opts.device))
+                        opts.batch_size, 10, torch.ones(1, 1, dtype=torch.bool, device=opts.device))
     else:
         raise NotImplementedError("Currently supported algorithms: 'ac', 'ppo'")
 
@@ -232,6 +252,7 @@ def run(opts):
 
 
 if __name__ == "__main__":
-    from options import get_options
-
-    run(get_options())
+    # load opts from yaml  (args)
+    with open(sys.argv[1]) as f:
+        opts = yaml.load(f, Loader=yaml.FullLoader)
+    run(opts)

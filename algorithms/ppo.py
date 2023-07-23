@@ -7,10 +7,10 @@ from algorithms.utils import Q, Sampler
 
 class PPO(AlgBase):
     def __init__(self, agent, opt, loss_weights, max_grad_norm, gamma, symmetric_force,
-                 eps, batch_part, update_iters, depot_mask):
+                 eps, batch_size, update_iters, depot_mask):
         super().__init__(agent, opt, loss_weights, max_grad_norm, gamma, symmetric_force)
         self.eps = eps
-        self.batch_part = batch_part
+        self.batch_size = batch_size
         self.update_iters = update_iters
         self.depot_mask = depot_mask
 
@@ -20,8 +20,7 @@ class PPO(AlgBase):
         not_done = torch.any(valid, dim=-1)  # [L, Bs]
         qvalues = Q(values, costs, not_done, self.gamma)
         old_probs = torch.sigmoid(logits)
-        minibatch_size = int(self.batch_part * logits.shape[0] * logits.shape[1])
-        sampler = Sampler(minibatch_size,
+        sampler = Sampler(self.batch_size,
                           [obs, actions, valid, qvalues, old_probs.detach()],
                           actions.shape[0] * actions.shape[1])
 
