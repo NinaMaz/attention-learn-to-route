@@ -123,14 +123,18 @@ def train_epoch(
         # bl_val = baseline values [B]
         x = move_to(x, opts.device)
         ep_step = 0  #
-        valid_mask = torch.ones(opts.batch_size, opts.graph_size, dtype=torch.bool, device=opts.device)
-        depot_mask = torch.ones(opts.batch_size, 1, dtype=torch.bool, device=opts.device)
+        valid_mask = torch.ones(x["loc"].shape[0], opts.graph_size, dtype=torch.bool, device=opts.device)
+        depot_mask = torch.ones(x["loc"].shape[0], 1, dtype=torch.bool, device=opts.device)
         traj = Trajectory()
         while x["loc"].nonzero().nelement() != 0:
             assert (ep_step < opts.graph_size)
             bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
             src_pad_mask = torch.cat([depot_mask, valid_mask], dim=1)
-            logits, select_mask, value = knapsack_alg.agent(x, src_pad_mask)  # mask: 1 = include, 0 = exclude
+            if opts.knapsack["alg"] == "ppo":
+                with torch.no_grad():
+                    logits, select_mask, value = knapsack_alg.agent(x, src_pad_mask)  # mask: 1 = include, 0 = exclude
+            else:
+                logits, select_mask, value = knapsack_alg.agent(x, src_pad_mask)  # mask: 1 = include, 0 = exclude
             traj.append("obs", x)
             subgraph, x = get_subgraph(x, select_mask)  #
             if opts.lr_model > 0:
