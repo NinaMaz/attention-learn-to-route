@@ -20,6 +20,8 @@ class StateCVRP(NamedTuple):
     lengths: torch.Tensor
     cur_coord: torch.Tensor
     i: torch.Tensor  # Keeps track of step
+    l_m: torch.Tensor #number_of_vehicles
+    l_u: torch.Tensor #number_of_used_vehicles   
 
     VEHICLE_CAPACITY = 1.0  # Hardcoded
 
@@ -62,6 +64,7 @@ class StateCVRP(NamedTuple):
         demand = input["demand"]
 
         batch_size, n_loc, _ = loc.size()
+        VEHICLE_CAPACITY = 1.0
         return StateCVRP(
             coords=torch.cat((depot[:, None, :], loc), -2),
             demand=demand,
@@ -90,6 +93,8 @@ class StateCVRP(NamedTuple):
             i=torch.zeros(
                 1, dtype=torch.int64, device=loc.device
             ),  # Vector with length num_steps
+            l_m = (demand.sum(-1)/VEHICLE_CAPACITY + 1).unsqueeze(-1),
+            l_u = torch.ones(batch_size, 1, device=loc.device),
         )
 
     def get_final_cost(self):
@@ -182,6 +187,10 @@ class StateCVRP(NamedTuple):
 
         # Cannot visit the depot if just visited and still unserved nodes
         mask_depot = (self.prev_a == 0) & ((mask_loc == 0).int().sum(-1) > 0)
+
+        unvis_demand = visited_loc.squeeze()==0
+        mask_depot = mask_depot & ((self.demand * unvis_demand.int().float()).sum(-1).unsqueeze(-1) > self.VEHICLE_CAPACITY * (self.l_m - self.l_u))
+
         return torch.cat((mask_depot[:, :, None], mask_loc), -1)
 
     def construct_solutions(self, actions):
