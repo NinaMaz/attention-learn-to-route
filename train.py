@@ -56,10 +56,10 @@ def rollout(model, tsp_model, dataset, opts):
                         )
                     )
                 l.append(temp)
-            cost = train_batch(tsp_model, l)
-            cost = torch.stack(
-                cost, dim=0
-            )  # torch.tensor(cost).unsqueeze(-1).to(opts.device)
+            cost = train_batch(
+                tsp_model, l, opts
+            )
+            cost = torch.tensor(cost).unsqueeze(-1).to(log_likelihood)
         return cost.data.cpu()
 
     return torch.cat(
@@ -154,7 +154,10 @@ def train_epoch(
             opts,
         )
 
-        cost = train_batch(model, subroutes)
+       
+        cost = train_batch(
+            model, subroutes, opts, step
+        )
 
         cost = torch.tensor(cost).unsqueeze(-1).to(log_likelihood)
         # Calculate loss
@@ -221,10 +224,9 @@ def train_epoch(
 
 
 def train_batch(
-    model, subroutes
+    model, subroutes, opts, step = None
 ):
     model.eval()
-    
     model.set_decode_type("greedy")
     results = []
     new_subroutes = []
@@ -232,12 +234,24 @@ def train_batch(
     for b in subroutes:
         new_subroutes.append(torch.stack(b, dim=0))
         n_s.append(len(b))
+    if step:    
+        wandb.log({"avg_len_subroutes": np.mean(n_s)}, step=step)
     new_subroutes = torch.cat(new_subroutes, dim = 0)
-    costs, log_likelihood = model(new_subroutes)
+    tsp_dataloader = DataLoader(
+        new_subroutes, batch_size=opts.batch_size
+    )
+    
+    l_costs = []
+    for b in tsp_dataloader:
+        costs, log_likelihood = model(b)
+        l_costs.append(costs)
+
+    costs = torch.cat(l_costs, dim = 0)
     
     ind_p = 0
     for n in n_s:
         results.append(costs[ind_p:ind_p+n].sum(0))
+
     return(results)
 
 
