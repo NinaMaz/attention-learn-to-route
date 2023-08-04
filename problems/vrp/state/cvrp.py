@@ -18,17 +18,19 @@ class StateCVRP(NamedTuple):
     used_capacity: torch.Tensor
     visited_: torch.Tensor  # Keeps track of nodes that have been visited
     lengths: torch.Tensor
+    last_length: torch.Tensor
     cur_coord: torch.Tensor
     i: torch.Tensor  # Keeps track of step
+    done: torch.Tensor
 
     VEHICLE_CAPACITY = 1.0  # Hardcoded
 
     @property
     def visited(self):
         if self.visited_.dtype == torch.uint8:
-            return self.visited_
+            return self.visited_.squeeze(1)
         else:
-            return mask_long2bool(self.visited_, n=self.demand.size(-1))
+            return mask_long2bool(self.visited_, n=self.demand.size(-1)).squeeze(1)
 
     @property
     def dist(self):
@@ -85,7 +87,9 @@ class StateCVRP(NamedTuple):
                     device=loc.device,
                 )  # Ceil
             ),
-            lengths=torch.zeros(batch_size, 1, device=loc.device),
+            lengths=torch.zeros(batch_size, device=loc.device),
+            last_length=torch.zeros(batch_size, device=loc.device),
+            done=torch.zeros(batch_size, dtype=torch.bool, device=loc.device),
             cur_coord=input["depot"][:, None, :],  # Add step dimension
             i=torch.zeros(
                 1, dtype=torch.int64, device=loc.device
@@ -96,9 +100,10 @@ class StateCVRP(NamedTuple):
 
         assert self.all_finished()
 
-        return self.lengths + (self.coords[self.ids, 0, :] - self.cur_coord).norm(
-            p=2, dim=-1
-        )
+        return self.lengths
+
+    def get_cost(self):
+        return self.last_length
 
     def update(self, selected):
 
@@ -115,9 +120,8 @@ class StateCVRP(NamedTuple):
         #     1,
         #     selected[:, None].expand(selected.size(0), 1, self.coords.size(-1))
         # )[:, 0, :]
-        lengths = self.lengths + (cur_coord - self.cur_coord).norm(
-            p=2, dim=-1
-        )  # (batch_dim, 1)
+        last_length = (cur_coord - self.cur_coord).norm(p=2, dim=-1).squeeze(1)  # (batch_size)
+        lengths = self.lengths + last_length
 
         # Not selected_demand is demand of first node (by clamp) so incorrect for nodes
         #  that visit depot!
@@ -139,23 +143,30 @@ class StateCVRP(NamedTuple):
             # This works, will not set anything if prev_a -1 == -1 (depot)
             visited_ = mask_long_scatter(self.visited_, prev_a - 1)
 
+        done = self.done | ((visited_.sum(-1) == visited_.size(-1)).squeeze(1) & (prev_a == 0).squeeze(1))
+
         return self._replace(
             prev_a=prev_a,
             used_capacity=used_capacity,
             visited_=visited_,
             lengths=lengths,
+            last_length=last_length,
             cur_coord=cur_coord,
+            done=done,
             i=self.i + 1,
         )
 
     def all_finished(self):
-        return self.i.item() >= self.demand.size(-1) and self.visited.all()
+        return self.i.item() >= self.demand.size(-1) and self.done.all()
 
     def get_finished(self):
-        return self.visited.sum(-1) == self.visited.size(-1)
+        return self.done
 
     def get_current_node(self):
-        return self.prev_a
+        return self.prev_a.squeeze(1)
+
+    def get_used_capacity(self):
+        return self.used_capacity.squeeze(1)
 
     def get_mask(self):
         """
@@ -180,9 +191,10 @@ class StateCVRP(NamedTuple):
         #  served now
         mask_loc = visited_loc.to(exceeds_cap.dtype) | exceeds_cap
 
-        # Cannot visit the depot if just visited and still unserved nodes
-        mask_depot = (self.prev_a == 0) & ((mask_loc == 0).int().sum(-1) > 0)
-        return torch.cat((mask_depot[:, :, None], mask_loc), -1)
+        # Cannot visit the depot if just visited
+        mask_depot = (self.prev_a == 0)
+        mask = torch.cat((mask_depot[:, :, None], mask_loc), -1).squeeze(1)
+        return mask | self.done.view(-1, 1)   # mask out all actions if done
 
     def construct_solutions(self, actions):
         return actions

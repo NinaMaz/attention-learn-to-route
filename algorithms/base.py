@@ -5,13 +5,12 @@ from utils import clip_grad_norms
 
 
 class AlgBase:
-    def __init__(self, agent, opt, loss_weights, max_grad_norm, gamma, symmetric_force):
+    def __init__(self, agent, opt, loss_weights, max_grad_norm, gamma):
         self.agent = agent
         self.opt = opt
         self.loss_weights = loss_weights
         self.max_grad_norm = max_grad_norm
         self.gamma = gamma
-        self.symmetric_force = symmetric_force
         self.step = 0
 
     def opt_step(self, losses):

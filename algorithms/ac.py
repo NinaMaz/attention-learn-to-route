@@ -8,39 +8,30 @@ from algorithms.utils import A
 class AC(AlgBase):
     def update(self, trajectory):
         x = trajectory["logits", "values", "actions", "valid", "costs"]
-        losses = AC.loss(*x, self.symmetric_force, self.gamma)
+        losses = AC.loss(*x, self.gamma)
         self.opt_step(losses)
         self.write_log(losses, trajectory)
 
     @staticmethod
     @torch.jit.script
-    def loss(logits, values, actions, valid, costs, symmetric_force: bool = True, gamma: float = 0.99):
-        # logits: [L, Bs, Nn], values: [L, Bs],
-        # select_mask: [L, Bs, Nn], valid_mask: [L, Bs, Nn], rewards: [L, Bs]
+    def loss(logits, values, actions, valid, costs, gamma: float = 0.99):
+        # logits: [L, Bs, Nn], values: [L, Bs], actions: [L, Bs], valid: [L, Bs, Nn], rewards: [L, Bs]
         not_done = torch.any(valid, dim=-1)  # [L, Bs]
         num_not_done = torch.count_nonzero(not_done) + 1e-5
-        num_valid = torch.count_nonzero(valid) + 1e-5
+        # num_valid = torch.count_nonzero(valid) + 1e-5
 
         # compute qvalues based on rewards and predicted values of the next state
-        advantage = A(values, costs, not_done, gamma)
+        advantage = A(values, costs, not_done, gamma)  # [L, Bs]
 
-        log_probs = F.logsigmoid(logits)
-        probs = torch.sigmoid(logits)
-
-        # policy grad loss
-        if symmetric_force:
-            force = actions.to(torch.float32) - actions.logical_not().to(torch.float32)
-        else:
-            force = actions
+        log_probs = torch.log_softmax(logits, dim=-1)  # [L, Bs, Nn]
+        log_prob_action = torch.gather(log_probs, -1, actions.unsqueeze(-1)).squeeze(-1)  # [L, Bs]
+        probs = torch.softmax(logits, dim=-1)  # [L, Bs, Nn]
 
         # policy loss
-        policy_loss = (log_probs * valid * force
-                       * advantage.detach().unsqueeze(-1)).sum() / num_valid
+        policy_loss = (log_prob_action * advantage.detach()).sum() / num_not_done
         # critic loss
         value_loss = advantage.pow(2).sum() / num_not_done
         # entropy loss
-        entropy_loss = - (
-                F.binary_cross_entropy_with_logits(logits, probs, reduction='none') * valid
-        ).sum() / num_valid
+        entropy_loss = (log_probs * probs * valid).sum() / num_not_done
 
         return policy_loss, value_loss, entropy_loss
