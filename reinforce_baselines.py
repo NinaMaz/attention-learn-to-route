@@ -227,7 +227,7 @@ class RolloutBaseline(Baseline):
             print("p-value: {}".format(p_val))
             if p_val < self.opts.bl_alpha:
                 print("Update baseline")
-                self._update_model(model, epoch)
+                self._update_model(model, self.tsp_model, epoch)
 
     def state_dict(self):
         return {"model": self.model, "dataset": self.dataset, "epoch": self.epoch}
