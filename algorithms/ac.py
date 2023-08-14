@@ -7,16 +7,16 @@ from algorithms.utils import A
 
 class AC(AlgBase):
     def update(self, trajectory):
-        x = trajectory["logits", "values", "actions", "valid", "costs"]
+        x = trajectory["logits", "values", "actions", "done", "valid", "costs"]
         losses = AC.loss(*x, self.gamma)
         self.opt_step(losses)
         self.write_log(losses, trajectory)
 
     @staticmethod
     @torch.jit.script
-    def loss(logits, values, actions, valid, costs, gamma: float = 0.99):
-        # logits: [L, Bs, Nn], values: [L, Bs], actions: [L, Bs], valid: [L, Bs, Nn], rewards: [L, Bs]
-        not_done = torch.any(valid, dim=-1)  # [L, Bs]
+    def loss(logits, values, actions, done, valid, costs, gamma: float = 0.99):
+        # logits: [L, Bs, Nn], values: [L, Bs], actions: [L, Bs], done: [L, Bs], valid: [L, Bs, Nn], rewards: [L, Bs]
+        not_done = done.logical_not()  # [L, Bs]
         num_not_done = torch.count_nonzero(not_done) + 1e-5
         # num_valid = torch.count_nonzero(valid) + 1e-5
 

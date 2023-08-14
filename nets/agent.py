@@ -135,16 +135,22 @@ class Agent(torch.nn.Module):
         return self.emb_proj(cat)
 
     def forward(self, obs, mask, greedy=False):
-        if "coords" in obs and "demands" in obs:
-            node_features = self.emb_fn(obs.get("coords"), obs.get("demands"))  # [batch_size, graph_size+1, dim]
-        else:
-            node_features = obs.get("features")
-        batch_size, graph_size, _ = node_features.size()
-
         current_node, used_capacity = obs["current"], obs["used_capacity"]  # [batch_size], [batch_size]
 
-        mem_node_features, node_features, graph_feature = self.enc(node_features, mask.logical_not(),
-            start_pos=current_node)  # [batch_size, graph_size, hidden_dim], [batch_size, hidden_dim]
+        if "coords" in obs and "demands" in obs:
+            node_features = self.emb_fn(obs.get("coords"), obs.get("demands"))  # [batch_size, graph_size+1, dim]
+            mem_node_features, node_features, graph_feature = self.enc(node_features, mask.logical_not(),
+                start_pos=current_node)  # [batch_size, graph_size, hidden_dim], [batch_size, hidden_dim]
+        elif "features" in obs:
+            node_features = obs.get("features")
+            mem_node_features, node_features, graph_feature = self.enc(node_features, mask.logical_not(),
+                start_pos=current_node)  # [batch_size, graph_size, hidden_dim], [batch_size, hidden_dim]
+        else:
+            raise RuntimeError
+
+        batch_size, graph_size, _ = node_features.size()
+
+
         # assert node_features.shape == torch.Size((batch_size, graph_size, 128)), node_features.shape
         # assert graph_feature.shape == torch.Size((batch_size, 128))
 
@@ -180,6 +186,7 @@ class Agent(torch.nn.Module):
         while not state.all_finished():
             step += 1
             mask = state.get_mask()
+            done = state.get_finished()
 
             logits, action, value, node_features = self.forward(obs, mask, greedy)
 
@@ -194,6 +201,7 @@ class Agent(torch.nn.Module):
                 traj.append("values", value)
                 traj.append("actions", action)
                 traj.append("valid", mask.logical_not())
+                traj.append("done", done)
 
             if self.update_node_features:
                 obs = {"features": node_features.detach(), "current": state.get_current_node(), "used_capacity": state.get_used_capacity()}
