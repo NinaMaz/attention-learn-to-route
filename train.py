@@ -59,7 +59,7 @@ def rollout(model, tsp_model, dataset, opts):
             cost = train_batch(
                 tsp_model, l, opts
             )
-            cost = torch.tensor(cost).unsqueeze(-1).to(log_likelihood)
+            cost = torch.tensor(cost).to(log_likelihood)
         return cost.data.cpu()
 
     return torch.cat(
@@ -159,7 +159,7 @@ def train_epoch(
             model, subroutes, opts, step
         )
 
-        cost = torch.tensor(cost).unsqueeze(-1).to(log_likelihood)
+        cost = torch.tensor(cost).to(log_likelihood)
         # Calculate loss
         bl_val, bl_loss = baseline.eval(x, cost) if bl_val is None else (bl_val, 0)
         reinforce_loss = ((cost - bl_val) * log_likelihood).mean()
