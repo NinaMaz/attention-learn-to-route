@@ -197,9 +197,9 @@ class GraphAttentionEncoder(nn.Module):
             )
         )
 
-    def forward(self, x, mask=None):
+    def forward(self, x, *args, **kwargs):
 
-        assert mask is None, "TODO mask not yet supported!"
+        # assert mask is None, "TODO mask not yet supported!"
 
         # Batch multiply to get initial embeddings of nodes
         h = (
@@ -211,6 +211,7 @@ class GraphAttentionEncoder(nn.Module):
         h = self.layers(h)
 
         return (
+            h,  # (batch_size, graph_size, embed_dim)
             h,  # (batch_size, graph_size, embed_dim)
             h.mean(dim=1),  # average to get embedding of graph, (batch_size, embed_dim)
         )
@@ -254,6 +255,7 @@ class GraphAttentionEncoderMask(nn.Module):
             h = h * mask.unsqueeze(-1)
 
         return (
+            h,
             # node embeddings (batch_size, graph_size, embed_dim)
             h,
             # average to get embedding of graph, (batch_size, embed_dim)

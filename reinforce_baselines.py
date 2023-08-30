@@ -151,14 +151,14 @@ class RolloutBaseline(Baseline):
         self._update_model(model, epoch)
 
     def _update_model(self, model, epoch, dataset=None):
-        # self.model = copy.deepcopy(model)
+        self.model = copy.deepcopy(model)
         # TODO: copy.deepcopy bug with my model
-        self.model = pickle.loads(pickle.dumps(model))
+        # self.model = pickle.loads(pickle.dumps(model))
         # Always generate baseline dataset when updating model
         # to prevent overfitting to the baseline dataset
 
         if dataset is not None:
-            if len(dataset) != self.opts.val_size:
+            if len(dataset) != self.opts.val_epoch_size:
                 print(
                     "Warning: not using saved baseline dataset \
                         since val_size does not match"
@@ -176,13 +176,13 @@ class RolloutBaseline(Baseline):
         if dataset is None:
             self.dataset = self.problem.make_dataset(
                 size=self.opts.graph_size,
-                num_samples=self.opts.val_size,
+                num_samples=self.opts.val_epoch_size,
                 distribution=self.opts.data_distribution,
             )
         else:
             self.dataset = dataset
         print("Evaluating baseline model on evaluation dataset")
-        self.bl_vals = rollout(self.model, self.dataset, self.opts).cpu().numpy()
+        self.bl_vals = rollout(self.model, self.dataset, self.opts, self.problem).cpu().numpy()
         self.mean = self.bl_vals.mean()
         self.epoch = epoch
 
@@ -191,7 +191,7 @@ class RolloutBaseline(Baseline):
         # Need to convert baseline to 2D to prevent converting to double, see
         # https://discuss.pytorch.org/t/dataloader-gives-double-instead-of-float/717/3
         return BaselineDataset(
-            dataset, rollout(self.model, dataset, self.opts).view(-1, 1)
+            dataset, rollout(self.model, dataset, self.opts, self.problem).view(-1, 1)
         )
 
     def unwrap_batch(self, batch):
@@ -216,7 +216,7 @@ class RolloutBaseline(Baseline):
         :param epoch: The current epoch
         """
         print("Evaluating candidate model on evaluation dataset")
-        candidate_vals = rollout(model, self.dataset, self.opts).cpu().numpy()
+        candidate_vals = rollout(model, self.dataset, self.opts, self.problem).cpu().numpy()
 
         candidate_mean = candidate_vals.mean()
 

@@ -146,8 +146,14 @@ class AgentGNN(nn.Module):
                                                         nn.Linear(self.dim * mlp_width_mult, self.dim))
 
         # Agent jump
-        self.key = nn.Sequential(nn.LayerNorm(self.dim * 2 + input_dim * 2),
-                                 nn.Linear(self.dim * 2 + input_dim * 2,
+        # self.key = nn.Sequential(nn.LayerNorm(self.dim * 2 + input_dim * 2),
+        #                          nn.Linear(self.dim * 2 + input_dim * 2,
+        #                                    self.dim * attn_width_mult * self.num_pos_attention_heads), nn.Identity())
+        self.key1 = nn.Sequential(nn.LayerNorm(self.dim + input_dim),
+                                 nn.Linear(self.dim + input_dim,
+                                           self.dim * attn_width_mult * self.num_pos_attention_heads), nn.Identity())
+        self.key2 = nn.Sequential(nn.LayerNorm(self.dim + input_dim),
+                                 nn.Linear(self.dim + input_dim,
                                            self.dim * attn_width_mult * self.num_pos_attention_heads), nn.Identity())
         self.query = nn.Sequential(nn.LayerNorm(self.dim),
                                    nn.Linear(self.dim, self.dim * attn_width_mult * self.num_pos_attention_heads))
@@ -255,14 +261,15 @@ class AgentGNN(nn.Module):
             # In the first iteration just update the starting node/agent embeddings
             if i < self.num_steps:
                 # Move agents
-                Q = self.query(agent_emb).view(agent_emb.size(0), agent_emb.size(1), self.num_pos_attention_heads, -1)  # [batch_size, n_agents, ...]
+                Q = self.query(agent_emb).view(agent_emb.size(0), agent_emb.size(1), 1, self.num_pos_attention_heads, 1, -1)  # [batch_size, n_agents, 1, n_heads, 1, d]
                 ext_node_emb = torch.cat([init_node_emb, node_emb], dim=-1)  # [batch_size, n_nodes, init_dim + dim]
-                K = torch.cat([
-                    ext_node_emb.unsqueeze(1).expand(-1, self.num_agents, -1, -1),
-                    ext_node_emb.gather(1, agent_pos.expand(-1, -1, ext_node_emb.size(-1))).unsqueeze(2).expand(-1, -1, num_nodes, -1)], dim=-1)
-                K = self.key(K).reshape(*K.shape[:3], self.num_pos_attention_heads, -1)  # [batch_size, n_agents, n_nodes, ...]
-                attn_score = (Q.unsqueeze(2) * K).sum(dim=-1) / sqrt(Q.size(-1))
-                del K, Q
+                K1 = ext_node_emb.gather(1, agent_pos.expand(-1, -1, ext_node_emb.size(-1)))  # [batch_size, n_agents, init_dim + dim]
+                K2 = ext_node_emb  # [batch_size, n_nodes, init_dim + dim]
+                K1 = self.key1(K1).reshape(agent_emb.size(0), agent_emb.size(1), 1, self.num_pos_attention_heads, -1, 1)  # [batch_size, n_agents, 1, n_heads, d, 1]
+                K2 = self.key2(K2).reshape(ext_node_emb.size(0), 1, ext_node_emb.size(1), self.num_pos_attention_heads, -1, 1)  # [batch_size, 1, n_nodes, n_heads, d, 1]
+                attn_score = (Q @ (K1 + K2)).squeeze((-1, -2)) / sqrt(Q.size(-1))   # [batch_size, n_agents, n_nodes, n_heads]
+                # print(attn_score.shape)
+                del K1, K2, Q
                 if self.num_pos_attention_heads > 1:
                     attn_score = self.attn_lin(attn_score)  # [batch_size, n_agents, n_nodes, 1]
                 attn_score = attn_score.squeeze(-1)  # [batch_size, n_agents, n_nodes]
@@ -291,24 +298,31 @@ class AgentGNN(nn.Module):
                 visited_nodes = torch.scatter(visited_nodes, -1, agent_pos, 1.0)  #[batch_size, n_agents, n_nodes]
 
         out_node_emb = self.out_proj(final_node_emb)
-        graph_emb = self.graph_readout(
-            torch.cat([
-                agent_emb.mean(dim=1),
-                node_emb.mean(dim=1) / (torch.sqrt(mask.count_nonzero(dim=1)).view(-1, 1) + 1e-6)], dim=-1)
-        )
+        if mask is not None:
+            graph_emb = self.graph_readout(
+                torch.cat([
+                    agent_emb.mean(dim=1),
+                    node_emb.mean(dim=1) / (torch.sqrt(mask.count_nonzero(dim=1)).view(-1, 1) + 1e-6)], dim=-1)
+            )
+        else:
+            graph_emb = self.graph_readout(
+                torch.cat([
+                    agent_emb.mean(dim=1),
+                    node_emb.mean(dim=1) / (log2(num_nodes) + 1e-6)], dim=-1)
+            )
         return final_node_emb, out_node_emb, graph_emb
 
 
 
 if __name__ == '__main__':
     import time
-    batch_size, num_nodes, num_agents, f_dim = 20, 1000, 25, 32
+    batch_size, num_nodes, num_agents, f_dim = 20, 1000, 100, 32
     agent_net = AgentGNN(
         input_dim=4,
         hidden_dim=f_dim,
         out_dim=5,
         dropout=0.0,
-        num_steps=10,
+        num_steps=12,
         num_agents=num_agents,
         node_readout=True,
         visited_decay=0.9,
@@ -321,15 +335,15 @@ if __name__ == '__main__':
     # print GPU memory usage in GB
     print(f"Allocated: {torch.cuda.memory_allocated() / 1024 ** 3:.1f} GB")
     print(f"Cached: {torch.cuda.memory_reserved() / 1024 ** 3:.1f} GB")
-    print(out[0].shape)
+    print(out[1].shape)
     input[0, :500] = 1e15
     mask[0, :500] = False
     out = agent_net(input, mask)
-    print(out[0].max())
+    print(out[1].max())
     # print GPU memory usage in GB
     print(f"Allocated: {torch.cuda.memory_allocated() / 1024 ** 3:.1f} GB")
     print(f"Cached: {torch.cuda.memory_reserved() / 1024 ** 3:.1f} GB")
-    print(out[0].shape)
+    print(out[1].shape)
 
     with torch.autograd.profiler.profile(use_cuda=True) as prof:
         out = agent_net(input)

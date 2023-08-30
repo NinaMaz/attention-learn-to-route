@@ -160,7 +160,7 @@ class StateCVRP(NamedTuple):
         return self.i.item() >= self.demand.size(-1) and self.done.all()
 
     def get_finished(self):
-        return self.done
+        return self.done.clone()
 
     def get_current_node(self):
         return self.prev_a.squeeze(1)
@@ -192,9 +192,9 @@ class StateCVRP(NamedTuple):
         mask_loc = visited_loc.to(exceeds_cap.dtype) | exceeds_cap
 
         # Cannot visit the depot if just visited
-        mask_depot = (self.prev_a == 0)
+        mask_depot = (self.prev_a == 0) & self.done.logical_not().view(-1, 1)
         mask = torch.cat((mask_depot[:, :, None], mask_loc), -1).squeeze(1)
-        return mask | self.done.view(-1, 1)   # mask out all actions if done
+        return mask
 
     def construct_solutions(self, actions):
         return actions

@@ -5,11 +5,12 @@ from algorithms.utils import Trajectory
 from nets.graph_encoder import *
 from nets.graph_network import *
 from nets.agent_gnn import *
+from nets.attention_model import *
 
 INF = 1e20
 
 class MultiHeadAttentionLogits(nn.Module):
-    def __init__(self, input_dim, embed_dim, n_heads):
+    def __init__(self, input_dim, embed_dim, n_heads, tanh_clipping=10):
         super().__init__()
         assert embed_dim % n_heads == 0, "Embedding dimension must be divisible by number of heads"
         embed_dim = embed_dim // n_heads
@@ -19,6 +20,7 @@ class MultiHeadAttentionLogits(nn.Module):
         self.norm_factor = 1 / math.sqrt(embed_dim)  # See Attention is all you need
         self.W_query = nn.Parameter(torch.Tensor(n_heads, input_dim, embed_dim))
         self.W_key = nn.Parameter(torch.Tensor(n_heads, input_dim, embed_dim))
+        self.tanh_clipping = tanh_clipping
         self.init_parameters()
 
     def init_parameters(self):
@@ -50,6 +52,8 @@ class MultiHeadAttentionLogits(nn.Module):
         # Calculate compatibility (batch_size, n_query, n_key)
         attn_logits = self.norm_factor * torch.matmul(Q, K.transpose(2, 3)).mean(0)
 
+        if self.tanh_clipping > 0:
+            attn_logits = torch.tanh(attn_logits) * self.tanh_clipping
         # Optionally apply mask to prevent attention
         if mask is not None:
             mask = mask.view(batch_size, n_query, n_key)
@@ -92,13 +96,13 @@ class Agent(torch.nn.Module):
                  n_heads=1,
                  num_layers=2,
                  dropout=0.1,
-                 update_node_features=False,
+                 node_features_option="once",
                  # encoder_steps_0=10,
                  # encoder_steps=10
         ):
         super().__init__()
         self.enc = eval(encoder_cls)(**encoder_params)
-        self.update_node_features = update_node_features
+        self.node_features_option = node_features_option
 
         # self.init_embed_depot = torch.nn.Linear(2, embedding_dim)
         # self.init_embed = torch.nn.Linear(3, embedding_dim)
@@ -137,7 +141,11 @@ class Agent(torch.nn.Module):
     def forward(self, obs, mask, greedy=False):
         current_node, used_capacity = obs["current"], obs["used_capacity"]  # [batch_size], [batch_size]
 
-        if "coords" in obs and "demands" in obs:
+        if "graph_feature" in obs:
+            graph_feature = obs["graph_feature"]
+            node_features = obs["features"]
+            mem_node_features = node_features.clone()
+        elif "coords" in obs and "demands" in obs:
             node_features = self.emb_fn(obs.get("coords"), obs.get("demands"))  # [batch_size, graph_size+1, dim]
             mem_node_features, node_features, graph_feature = self.enc(node_features, mask.logical_not(),
                 start_pos=current_node)  # [batch_size, graph_size, hidden_dim], [batch_size, hidden_dim]
@@ -174,7 +182,7 @@ class Agent(torch.nn.Module):
 
         value = self.val_layers(graph_feature).squeeze(-1)  # [batch_size]
 
-        return logits, action, value, mem_node_features
+        return logits, action, value, mem_node_features, graph_feature
 
     def play(self, state, greedy=False):
         # device = next(iter(self.parameters())).device
@@ -188,7 +196,10 @@ class Agent(torch.nn.Module):
             mask = state.get_mask()
             done = state.get_finished()
 
-            logits, action, value, node_features = self.forward(obs, mask, greedy)
+            logits, action, value, node_features, graph_feature = self.forward(obs, mask, greedy)
+            # print(mask)
+            # print(logits)
+            # print(action)
 
             state = state.update(action)
             cost = state.get_cost()
@@ -203,8 +214,11 @@ class Agent(torch.nn.Module):
                 traj.append("valid", mask.logical_not())
                 traj.append("done", done)
 
-            if self.update_node_features:
+            if self.node_features_option == "update":
                 obs = {"features": node_features.detach(), "current": state.get_current_node(), "used_capacity": state.get_used_capacity()}
+            elif self.node_features_option == "once":
+                obs = {"features": node_features, "current": state.get_current_node(),
+                       "graph_feature": graph_feature, "used_capacity": state.get_used_capacity()}
             else:
                 obs.update({"current": state.get_current_node(), "used_capacity": state.get_used_capacity()})
 
