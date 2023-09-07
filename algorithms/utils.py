@@ -12,11 +12,26 @@ def Q(values: torch.Tensor, rewards: torch.Tensor, not_done: torch.Tensor, gamma
     return qvalues * not_done
 
 
+@torch.jit.script
+def Q_n(values: torch.Tensor, rewards: torch.Tensor, not_done: torch.Tensor, gamma: float, n: int = 1):
+    next_values = torch.cat([
+        (values.detach() * not_done)[n:],
+        torch.zeros([n]+list(values.shape[1:]), device=values.device)
+    ])
+    rewards = torch.cat([
+        rewards * not_done,
+        torch.zeros([n-1]+list(values.shape[1:]), device=values.device)
+    ])
+    rewards_windows = rewards.unfold(0, n, 1)  # [L, B, W]
+    decay = gamma ** torch.arange(0, n, device=rewards.device)
+    qvalues = (rewards_windows * decay).sum(-1) + (gamma**n) * next_values
+    return qvalues
+
 
 @torch.jit.script
 def A(values: torch.Tensor, rewards: torch.Tensor, not_done: torch.Tensor, gamma: float):
     qvalues = Q(values, rewards, not_done, gamma)
-    advantage = (qvalues - values) * not_done
+    advantage = (qvalues - values)
     return advantage
 
 

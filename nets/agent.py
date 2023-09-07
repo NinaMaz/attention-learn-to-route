@@ -86,6 +86,26 @@ class Decoder(torch.nn.Module):
         return attn
 
 
+class Critic(torch.nn.Module):
+    def __init__(self, dim, n_heads, dim_feedforward, num_layers, dropout):
+        super().__init__()
+        self.attn = torch.nn.TransformerDecoder(
+            torch.nn.TransformerDecoderLayer(d_model=dim, nhead=n_heads, dim_feedforward=dim_feedforward, dropout=dropout, batch_first=True, norm_first=True),
+        num_layers=num_layers)
+        self.dense = torch.nn.Sequential(
+            torch.nn.Linear(dim, dim),
+            torch.nn.ELU(),
+            torch.nn.Linear(dim, dim),
+            torch.nn.ELU(),
+            torch.nn.Linear(dim, 1)
+        )
+
+    def forward(self, q, k, mask=None):
+        q = self.attn(q, k, memory_key_padding_mask=mask)  # (batch_size, 1, dim)
+        q = self.dense(q).squeeze(-1)
+        return q
+
+
 class Agent(torch.nn.Module):
     def __init__(self,
                  encoder_cls,
@@ -114,12 +134,15 @@ class Agent(torch.nn.Module):
                              dropout=dropout, kdim=hidden_dim, vdim=hidden_dim)
         self.query_proj = torch.nn.Linear(hidden_dim * 2 + 1, hidden_dim)
 
-        self.val_layers = torch.nn.Sequential(
-            torch.nn.ELU(),
-            torch.nn.Linear(hidden_dim, hidden_dim // 2),
-            torch.nn.ELU(),
-            torch.nn.Linear(hidden_dim // 2, 1),
-        )
+        self.critic = Critic(dim=hidden_dim, n_heads=n_heads, dim_feedforward=ff_hidden_dim, num_layers=num_layers,
+                             dropout=dropout)
+        self.critic_proj = torch.nn.Linear(hidden_dim * 2 + 1, hidden_dim)
+        # self.critic = torch.nn.Sequential(
+        #     torch.nn.ELU(),
+        #     torch.nn.Linear(hidden_dim, hidden_dim // 2),
+        #     torch.nn.ELU(),
+        #     torch.nn.Linear(hidden_dim // 2, 1),
+        # )
 
         # self.encoder_steps_0 = encoder_steps_0
         # self.encoder_steps = encoder_steps
@@ -169,8 +192,8 @@ class Agent(torch.nn.Module):
         ], -1).unsqueeze(1)  # [batch_size, 1, hidden_dim * 2 + 1]
         # assert query.shape == torch.Size([batch_size, 1, 128 * 2 + 1]), query.shape
 
-        query = self.query_proj(query)
-        logits = self.actor(query, node_features, node_features, mask=mask).squeeze(1)  # logits: [batch_size, graph_size]
+        actor_query = self.query_proj(query)
+        logits = self.actor(actor_query, node_features, node_features, mask=mask).squeeze(1)  # logits: [batch_size, graph_size]
         # assert logits.shape == torch.Size([batch_size, graph_size])
 
         if greedy:
@@ -180,7 +203,9 @@ class Agent(torch.nn.Module):
             action = torch.multinomial(probs, 1).view(-1)   # [batch_size]
         # assert action.shape == torch.Size([batch_size])
 
-        value = self.val_layers(graph_feature).squeeze(-1)  # [batch_size]
+        critic_query = self.critic_proj(query)
+        value = self.critic(critic_query, node_features, mask=mask).squeeze(-1)  # [batch_size]
+        # value = self.critic(graph_feature).squeeze(-1)  # [batch_size]
 
         return logits, action, value, mem_node_features, graph_feature
 
@@ -197,9 +222,6 @@ class Agent(torch.nn.Module):
             done = state.get_finished()
 
             logits, action, value, node_features, graph_feature = self.forward(obs, mask, greedy)
-            # print(mask)
-            # print(logits)
-            # print(action)
 
             state = state.update(action)
             cost = state.get_cost()

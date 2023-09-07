@@ -90,10 +90,11 @@ def train_epoch(
         x, bl_val = baseline.unwrap_batch(batch)
         # x = dataset item: {"loc", "demand", "depot"}
         x = move_to(x, opts.device)
-        bl_val = move_to(bl_val, opts.device)
         state = problem.make_state(x)
         cost, traj = alg.agent.play(state)
-        traj.append("b_rollout", bl_val)
+        if bl_val is not None:
+            bl_val = move_to(bl_val, opts.device)
+            traj.append("b_rollout", bl_val)
         # assert cost.allclose(traj["costs"].sum(0))
         alg.update(traj)
         # print total gpu memory usage

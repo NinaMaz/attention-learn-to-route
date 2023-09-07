@@ -1,0 +1,63 @@
+bl_alpha: 0.05
+bl_warmup_epochs: 1
+checkpoint_encoder: false
+checkpoint_epochs: 1
+data_distribution: null
+device: cuda:0
+epoch_start: 0
+eval_only: false
+exp_beta: 0.8
+wandb_disabled: false
+
+batch_size: 200
+eval_batch_size: 200
+graph_size: 100
+train_epoch_size: 50000
+val_epoch_size: 10000
+buffer_size: 12000
+n_epochs: 100
+
+alg:
+  type: ac  # ac, ppo, pg_rollout
+  args:
+    loss_weights:
+      - 1.0
+      - 1.0
+      - 0.001
+    max_grad_norm: 1.0
+    gamma: 1
+
+agent:
+  encoder:
+    cls: GraphAttentionEncoderMask  # GraphAttentionEncoder, GraphAttentionEncoderMask, AgentGNN
+    args:
+      n_heads: 8
+      embed_dim: 128
+      n_layers: 3
+      normalization: batch
+  embedding_dim: 128
+  hidden_dim: 128
+  ff_hidden_dim: 512
+  n_heads: 8
+  num_layers: 3
+  dropout: 0
+  node_features_option: always # once, update, always
+
+log_dir: logs
+log_step: 50
+
+lr_actor: 0.00008
+lr_critic: 0.00008
+lr_encoder: 0.00008
+lr_decay: 0.98
+no_progress_bar: false
+normalization: batch
+output_dir: outputs
+problem: cvrp
+resume: null
+save_dir: outputs
+seed: 1234
+shrink_size: null
+tanh_clipping: 10.0
+val_dataset: null
+num_workers: 4

@@ -47,7 +47,7 @@ def run(opts):
         settings= {
            "_disable_stats": True,
            "system_sample_seconds": 999999999,
-           # "disabled": True
+           "disabled": opts.get("wandb_disabled", False)
         })
     wandb.define_metric("val_avg_reward", summary="min")
     # Pretty print the run args
@@ -84,7 +84,7 @@ def run(opts):
     optimizer = optim.Adam([
         {"params": agent.enc.parameters(), "lr": opts.lr_encoder},
         {"params": agent.actor.parameters(), "lr": opts.lr_actor},
-        {"params": agent.val_layers.parameters(), "lr": opts.lr_critic},
+        {"params": agent.critic.parameters(), "lr": opts.lr_critic},
     ])
     # Initialize learning rate scheduler, decay by lr_decay once per epoch!
     lr_scheduler = optim.lr_scheduler.LambdaLR(

@@ -254,10 +254,12 @@ class GraphAttentionEncoderMask(nn.Module):
             h = l(h, src_key_padding_mask=mask.logical_not())
             h = h * mask.unsqueeze(-1)
 
+        graph_feature = h.sum(dim=1) / np.sqrt(h.size(1))
+
         return (
             h,
             # node embeddings (batch_size, graph_size, embed_dim)
             h,
             # average to get embedding of graph, (batch_size, embed_dim)
-            h.sum(dim=1) / np.sqrt(h.size(1))
+            graph_feature
         )

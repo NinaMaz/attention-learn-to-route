@@ -3,7 +3,7 @@ bl_warmup_epochs: 1
 checkpoint_encoder: false
 checkpoint_epochs: 1
 data_distribution: null
-device: cuda:0
+device: cuda:1
 epoch_start: 0
 eval_only: false
 exp_beta: 0.8
