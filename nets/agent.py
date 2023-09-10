@@ -117,6 +117,7 @@ class Agent(torch.nn.Module):
                  num_layers=2,
                  dropout=0.1,
                  node_features_option="once",
+                 critic=True,
                  # encoder_steps_0=10,
                  # encoder_steps=10
         ):
@@ -164,20 +165,20 @@ class Agent(torch.nn.Module):
     def forward(self, obs, mask, greedy=False):
         current_node, used_capacity = obs["current"], obs["used_capacity"]  # [batch_size], [batch_size]
 
-        if "graph_feature" in obs:
-            graph_feature = obs["graph_feature"]
-            node_features = obs["features"]
-            mem_node_features = node_features.clone()
-        elif "coords" in obs and "demands" in obs:
-            node_features = self.emb_fn(obs.get("coords"), obs.get("demands"))  # [batch_size, graph_size+1, dim]
+        if self.node_features_option == "always" or "node_features" not in obs:
+            node_features = self.emb_fn(obs["coords"], obs["demands"])  # [batch_size, graph_size+1, dim]
             mem_node_features, node_features, graph_feature = self.enc(node_features, mask.logical_not(),
                 start_pos=current_node)  # [batch_size, graph_size, hidden_dim], [batch_size, hidden_dim]
-        elif "features" in obs:
-            node_features = obs.get("features")
+        elif self.node_features_option == "once":
+            graph_feature = obs["graph_feature"]
+            node_features = obs["node_features"]
+            mem_node_features = node_features.clone()
+        elif self.node_features_option == "update":
+            node_features = obs["node_features"]
             mem_node_features, node_features, graph_feature = self.enc(node_features, mask.logical_not(),
                 start_pos=current_node)  # [batch_size, graph_size, hidden_dim], [batch_size, hidden_dim]
         else:
-            raise RuntimeError
+            raise RuntimeError("Allowed options for `node_features_option` are: once, always, update")
 
         batch_size, graph_size, _ = node_features.size()
 
@@ -207,9 +208,13 @@ class Agent(torch.nn.Module):
         value = self.critic(critic_query, node_features, mask=mask).squeeze(-1)  # [batch_size]
         # value = self.critic(graph_feature).squeeze(-1)  # [batch_size]
 
-        return logits, action, value, mem_node_features, graph_feature
+        obs["node_features"] = node_features
+        obs["graph_feature"] = graph_feature
+        obs["mem_node_features"] = mem_node_features.detach()
 
-    def play(self, state, greedy=False):
+        return logits, action, value, obs
+
+    def play(self, state, greedy=False, update_steps=None, alg=None):
         # device = next(iter(self.parameters())).device
         traj = Trajectory()
         obs = {"coords": state.coords, "demands": state.demand,
@@ -221,7 +226,7 @@ class Agent(torch.nn.Module):
             mask = state.get_mask()
             done = state.get_finished()
 
-            logits, action, value, node_features, graph_feature = self.forward(obs, mask, greedy)
+            logits, action, value, obs = self.forward(obs, mask, greedy)
 
             state = state.update(action)
             cost = state.get_cost()
@@ -235,14 +240,11 @@ class Agent(torch.nn.Module):
                 traj.append("actions", action)
                 traj.append("valid", mask.logical_not())
                 traj.append("done", done)
+                if update_steps is not None and alg is not None and step % update_steps == 0:
+                    alg.update(traj)
+                    traj = Trajectory()
 
-            if self.node_features_option == "update":
-                obs = {"features": node_features.detach(), "current": state.get_current_node(), "used_capacity": state.get_used_capacity()}
-            elif self.node_features_option == "once":
-                obs = {"features": node_features, "current": state.get_current_node(),
-                       "graph_feature": graph_feature, "used_capacity": state.get_used_capacity()}
-            else:
-                obs.update({"current": state.get_current_node(), "used_capacity": state.get_used_capacity()})
+            obs.update({"current": state.get_current_node(), "used_capacity": state.get_used_capacity()})
 
             # print(step)
             # print(f"Allocated: {torch.cuda.memory_allocated(logits.device) / 1024 ** 3:.1f} GB")

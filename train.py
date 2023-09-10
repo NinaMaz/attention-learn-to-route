@@ -100,6 +100,7 @@ def train_epoch(
         # print total gpu memory usage
         wandb.log({"gpu_memory_allocated, GB": torch.cuda.memory_allocated(opts.device) / 1e9}, step=alg.step)
         wandb.log({"gpu_memory_reserved, GB": torch.cuda.memory_reserved(opts.device) / 1e9}, step=alg.step)
+        wandb.log({"train_avg_cost": cost.mean()}, step=alg.step)
 
     epoch_duration = time.time() - start_time
     print(
