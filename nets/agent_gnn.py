@@ -80,8 +80,8 @@ class AgentGNN(nn.Module):
         self.out_proj = nn.Linear(self.dim, self.out_dim)
         # Node and agents states
         self.node_mem_init = torch.nn.Parameter(torch.zeros(self.dim, requires_grad=True))
-        # self.agent_emb = nn.Embedding(self.num_agents, self.dim)
-        self.agent_emb = nn.Linear(self.input_dim, self.dim)
+        self.agent_emb = nn.Embedding(self.num_agents, self.dim)
+        # self.agent_emb = nn.Linear(self.input_dim, self.dim)
 
         # Node and agent update
         self.message_val = nn.Sequential(
@@ -175,8 +175,8 @@ class AgentGNN(nn.Module):
             elif isinstance(m, nn.Embedding):
                 m.reset_parameters()
 
-    def forward(self, node_emb: torch.Tensor, mask: torch.Tensor = None,
-                num_steps: int = None, start_pos: torch.Tensor = None):
+    def forward(self, node_emb: torch.Tensor, mask: torch.Tensor = None,  # mask indicates valid nodes
+                num_steps: int = None, start_pos: torch.Tensor = None, return_agent_paths=False):
         # x.shape = [batch_size, num_nodes, num_features], mask.shape = [batch_size, num_nodes]
         batch_size, num_nodes, input_dim = node_emb.size()
         num_steps = num_steps if num_steps is not None else self.num_steps
@@ -185,7 +185,8 @@ class AgentGNN(nn.Module):
         init_node_emb = node_emb.clone()
         node_emb = self.input_proj(node_emb)  # [batch_size, num_nodes, dim]
         # agent_emb = self.agent_emb(torch.arange(self.num_agents, device=node_emb.device)).unsqueeze(0).expand(batch_size, -1, -1)  # [batch_size, n_agents, dim]
-
+        if mask is not None:
+            node_emb = node_emb * mask.unsqueeze(-1)
 
         # set initial positions randomly or in start_pos
         if start_pos is not None:
@@ -196,7 +197,8 @@ class AgentGNN(nn.Module):
             else:
                 agent_pos = torch.randint(num_nodes, (batch_size, self.num_agents, 1), device=node_emb.device)  # [batch_size, n_agents, 1]
         agent_node_attn_value = torch.ones(agent_pos.size(), dtype=torch.float, device=agent_pos.device)
-        agent_emb = self.agent_emb(init_node_emb.gather(1, agent_pos.expand(-1, -1, input_dim)))  # [batch_size, n_agents, dim]
+        # agent_emb = self.agent_emb(init_node_emb.gather(1, agent_pos.expand(-1, -1, input_dim)))  # [batch_size, n_agents, dim]
+        agent_emb = self.agent_emb(torch.arange(self.num_agents, device=node_emb.device)).expand(batch_size, -1, -1) # [batch_size, n_agents, dim]
 
         final_node_emb = torch.zeros(batch_size, num_nodes, self.dim, device=node_emb.device)  # [batch_size, n_nodes, dim]
 
@@ -204,8 +206,14 @@ class AgentGNN(nn.Module):
         visited_nodes = torch.zeros(batch_size, self.num_agents, num_nodes, dtype=torch.float, device=node_emb.device) # [batch_size, n_agents, n_nodes]
         visited_nodes.scatter_(-1, agent_pos, 1.0)  # [batch_size, n_agents, n_nodes]
         agent_pos_onehot = visited_nodes.clone()  # [batch_size, n_agents, num_nodes]
+        agent_paths = []
 
-        for i in range(num_steps + 1):
+        for i in range(num_steps):
+            if return_agent_paths:
+                agent_paths.append(agent_pos.detach())
+            if i < num_steps - self.bptt_steps:
+                agent_emb = agent_emb.detach()
+                node_emb = node_emb.detach()
             # Get time for current step
             time_emb = self.time_emb(torch.tensor([i], device=node_emb.device, dtype=torch.long))  # [time_emb_dim]
 
@@ -231,7 +239,7 @@ class AgentGNN(nn.Module):
                 node_emb_sum = node_emb_sum / (torch.log2(mask.count_nonzero(dim=1).view(-1, 1, 1) + 1) + 1e-6)  # [batch_size, n_nodes, dim]
             else:
                 node_emb_sum = node_emb.sum(dim=1, keepdim=True) - node_emb  # [batch_size, n_nodes, dim]
-                node_emb_sum = node_emb_sum / (log2(num_nodes) + 1e-6)  # [batch_size, n_nodes, dim]
+                node_emb_sum = node_emb_sum / (log2(num_nodes + 1) + 1e-6)  # [batch_size, n_nodes, dim]
             node_update = torch.cat([
                 init_node_emb,
                 node_emb,
@@ -254,12 +262,12 @@ class AgentGNN(nn.Module):
             # Readout
             if self.node_readout:
                 layer_out = self.step_readout_mlp(node_emb + self.step_readout_mlp_time(time_emb))
-                final_node_emb += layer_out / (self.num_steps + 1)
+                final_node_emb += layer_out / (num_steps + 1)
             else:
                 final_node_emb = node_emb
 
             # In the first iteration just update the starting node/agent embeddings
-            if i < self.num_steps:
+            if i < num_steps:
                 # Move agents
                 Q = self.query(agent_emb).view(agent_emb.size(0), agent_emb.size(1), 1, self.num_pos_attention_heads, 1, -1)  # [batch_size, n_agents, 1, n_heads, 1, d]
                 ext_node_emb = torch.cat([init_node_emb, node_emb], dim=-1)  # [batch_size, n_nodes, init_dim + dim]
@@ -302,21 +310,24 @@ class AgentGNN(nn.Module):
             graph_emb = self.graph_readout(
                 torch.cat([
                     agent_emb.mean(dim=1),
-                    node_emb.mean(dim=1) / (torch.sqrt(mask.count_nonzero(dim=1)).view(-1, 1) + 1e-6)], dim=-1)
+                    node_emb.mean(dim=1) / (torch.log2(mask.count_nonzero(dim=1).view(-1, 1) + 1) + 1e-6)], dim = -1)
             )
         else:
             graph_emb = self.graph_readout(
                 torch.cat([
                     agent_emb.mean(dim=1),
-                    node_emb.mean(dim=1) / (log2(num_nodes) + 1e-6)], dim=-1)
+                    node_emb.mean(dim=1) / (log2(num_nodes + 1) + 1e-6)], dim=-1)
             )
-        return final_node_emb, out_node_emb, graph_emb
+        if return_agent_paths:
+            return final_node_emb, out_node_emb, graph_emb, agent_paths
+        else:
+            return final_node_emb, out_node_emb, graph_emb
 
 
 
 if __name__ == '__main__':
     import time
-    batch_size, num_nodes, num_agents, f_dim = 20, 1000, 100, 32
+    batch_size, num_nodes, num_agents, f_dim = 20, 100, 50, 32
     agent_net = AgentGNN(
         input_dim=4,
         hidden_dim=f_dim,
@@ -324,7 +335,7 @@ if __name__ == '__main__':
         dropout=0.0,
         num_steps=12,
         num_agents=num_agents,
-        node_readout=True,
+        node_readout=False,
         visited_decay=0.9,
         num_pos_attention_heads=1
     ).to("cuda:0")
@@ -335,15 +346,14 @@ if __name__ == '__main__':
     # print GPU memory usage in GB
     print(f"Allocated: {torch.cuda.memory_allocated() / 1024 ** 3:.1f} GB")
     print(f"Cached: {torch.cuda.memory_reserved() / 1024 ** 3:.1f} GB")
-    print(out[1].shape)
-    input[0, :500] = 1e15
-    mask[0, :500] = False
+    print(out[1].mean(), out[1].shape)
+    input[0, :50] = 1e15
+    mask[0, :50] = False
     out = agent_net(input, mask)
-    print(out[1].max())
     # print GPU memory usage in GB
     print(f"Allocated: {torch.cuda.memory_allocated() / 1024 ** 3:.1f} GB")
     print(f"Cached: {torch.cuda.memory_reserved() / 1024 ** 3:.1f} GB")
-    print(out[1].shape)
+    print(out[1].mean(), out[1].shape)
 
     with torch.autograd.profiler.profile(use_cuda=True) as prof:
         out = agent_net(input)
@@ -351,4 +361,17 @@ if __name__ == '__main__':
     with torch.autograd.profiler.profile(use_cuda=True) as prof:
         out = agent_net(input, mask)
     print(prof.total_average())
+
+    # training
+    input = torch.randn(batch_size, num_nodes, 4, device="cuda:0")
+    mask = torch.ones(batch_size, num_nodes, device="cuda:0", dtype=torch.bool)
+    pos = torch.zeros(batch_size, device="cuda:0", dtype=torch.long)
+    agent_net.eval()
+    torch.random.manual_seed(0)
+    out1 = agent_net(input, start_pos=pos)
+    torch.random.manual_seed(0)
+    out2 = agent_net(input, mask, start_pos=pos)
+    for o1, o2 in zip(out1, out2):
+        print(torch.allclose(o1, o2, 1e-4))
+
 
