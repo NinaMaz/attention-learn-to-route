@@ -12,6 +12,7 @@ from algorithms.utils import Trajectory
 from nets.attention_model import set_decode_type
 from utils.log_utils import log_values
 from utils import move_to, get_subgraph, clip_grad_norms, ReplayBuffer
+from nets.agent_gnn import AgentGNN
 
 
 def get_inner_model(model):
@@ -83,6 +84,9 @@ def train_epoch(
         training_dataset, batch_size=opts.batch_size, num_workers=opts.num_workers
     )
     alg.agent.train()
+    if isinstance(alg.agent.enc, AgentGNN) and hasattr(alg.agent.enc, "max_steps"):
+        alg.agent.enc.num_steps = max(alg.agent.enc.min_steps,
+                                      alg.agent.enc.max_steps * (epoch + 1) // opts.n_epochs)
 
     for batch_id, batch in enumerate(
             tqdm(training_dataloader, disable=opts.no_progress_bar)
@@ -98,9 +102,13 @@ def train_epoch(
         # assert cost.allclose(traj["costs"].sum(0))
         alg.update(traj)
         # print total gpu memory usage
-        wandb.log({"gpu_memory_allocated, GB": torch.cuda.memory_allocated(opts.device) / 1e9}, step=alg.step)
-        wandb.log({"gpu_memory_reserved, GB": torch.cuda.memory_reserved(opts.device) / 1e9}, step=alg.step)
-        wandb.log({"train_avg_cost": cost.mean()}, step=alg.step)
+        if alg.step % 100 == 0:
+            wandb.log({"gpu_memory_allocated, GB": torch.cuda.memory_allocated(opts.device) / 1e9}, step=alg.step)
+            wandb.log({"gpu_memory_reserved, GB": torch.cuda.memory_reserved(opts.device) / 1e9}, step=alg.step)
+            wandb.log({"train_avg_cost": cost.mean()}, step=alg.step)
+            wandb.log({"Example": opts.batch_size * alg.step}, step=alg.step)
+            if isinstance(alg.agent.enc, AgentGNN):
+                wandb.log({"AgentGNN steps": alg.agent.enc.num_steps}, step=alg.step)
 
     epoch_duration = time.time() - start_time
     print(
