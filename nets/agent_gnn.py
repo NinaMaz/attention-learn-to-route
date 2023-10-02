@@ -49,7 +49,8 @@ class AgentGNN(nn.Module):
                  node_readout,
                  visited_decay = 0.9,
                  num_pos_attention_heads = 1,
-                 bptt_steps = None
+                 bptt_steps = None,
+                 gate = True,
                  ):
         super().__init__()
 
@@ -63,6 +64,7 @@ class AgentGNN(nn.Module):
         self.visited_decay = visited_decay
         self.num_pos_attention_heads = num_pos_attention_heads
         self.bptt_steps = bptt_steps if bptt_steps is not None else num_steps
+        self.gate = gate
 
         self.activation = nn.LeakyReLU(negative_slope=0.01)
         self.temp = 2.0 / 3.0
@@ -70,6 +72,9 @@ class AgentGNN(nn.Module):
         mlp_width_mult = 2
         attn_width_mult = 1
 
+        if isinstance(self.num_steps, (tuple, list)):
+            self.min_steps, self.max_steps = self.num_steps
+            self.num_steps = self.max_steps
 
         self.time_emb = TimeEmbedding(self.num_steps + 1, self.dim, self.dim * mlp_width_mult)
         if input_dim != hidden_dim:
@@ -94,7 +99,7 @@ class AgentGNN(nn.Module):
             nn.Linear(self.dim * 2 + input_dim, self.dim * 2 * mlp_width_mult),
             self.activation,
             nn.Dropout(self.dropout),
-            nn.Linear(self.dim * 2 * mlp_width_mult, self.dim),
+            nn.Linear(self.dim * 2 * mlp_width_mult, self.dim * 2) if self.gate else nn.Linear(self.dim * 2 * mlp_width_mult, self.dim),
             nn.Dropout(self.dropout)
         )
         self.node_mlp = nn.Sequential(
@@ -102,7 +107,7 @@ class AgentGNN(nn.Module):
             nn.Linear(self.dim * 2 + extra_global_dim + input_dim, self.dim * 2 * mlp_width_mult),
             self.activation,
             nn.Dropout(self.dropout),
-            nn.Linear(self.dim * 2 * mlp_width_mult, self.dim),
+            nn.Linear(self.dim * 2 * mlp_width_mult, self.dim * 2) if self.gate else nn.Linear(self.dim * 2 * mlp_width_mult, self.dim),
             nn.Dropout(self.dropout)
         )
         self.agent_mlp = nn.Sequential(
@@ -110,7 +115,7 @@ class AgentGNN(nn.Module):
             nn.Linear(self.dim * 2 + extra_global_dim, self.dim * 2 * mlp_width_mult),
             self.activation,
             nn.Dropout(self.dropout),
-            nn.Linear(self.dim * 2 * mlp_width_mult, self.dim),
+            nn.Linear(self.dim * 2 * mlp_width_mult, self.dim * 2) if self.gate else nn.Linear(self.dim * 2 * mlp_width_mult, self.dim),
             nn.Dropout(self.dropout)
         )
         self.global_agent_pool_mlp = nn.Sequential(
@@ -323,7 +328,12 @@ class AgentGNN(nn.Module):
                 agent_emb.mean(dim=1, keepdim=True).expand(-1, num_nodes, -1)  # log mean of all agent embeddings
             ], dim=-1)   # [batch_size, n_nodes, dim * 3]
             node_update = node_update + self.node_mlp_time(time_emb)
-            node_emb = node_emb + node_mask * self.node_mlp(node_update)
+            if self.gate:
+                node_update, z = self.node_mlp(node_update).chunk(2, dim=-1)
+                z = torch.sigmoid(z)
+                node_emb = ~node_mask * node_emb + node_mask * ((1-z) * node_emb + z * node_update)
+            else:
+                node_emb = node_emb + node_mask * self.node_mlp(node_update)
             del node_update, agent_emb_sum, agent_count
 
             # Do a convolution to get neighborhood info
@@ -339,7 +349,12 @@ class AgentGNN(nn.Module):
                 node_emb_sum  # log mean of neighbor embeddings
             ], dim=-1)  # [batch_size, n_nodes, dim * 2]
             node_update = node_update + self.conv_mlp_time(time_emb)
-            node_emb = node_emb + node_mask * self.conv_mlp(node_update)
+            if self.gate:
+                node_update, z = self.conv_mlp(node_update).chunk(2, dim=-1)
+                z = torch.sigmoid(z)
+                node_emb = ~node_mask * node_emb + node_mask * ((1-z) * node_emb + z * node_update)
+            else:
+                node_emb = node_emb + node_mask * self.conv_mlp(node_update)
             del node_update, node_emb_sum, node_mask
 
             # Update agent embeddings
@@ -350,7 +365,12 @@ class AgentGNN(nn.Module):
                 agent_emb.mean(dim=1, keepdim=True).expand(-1, self.num_agents, -1)
             ], dim=-1)  # [batch_size, n_agents, dim * 3]
             agent_update = agent_update + self.agent_mlp_time(time_emb)
-            agent_emb = agent_emb + self.agent_mlp(agent_update)
+            if self.gate:
+                agent_update, z = self.agent_mlp(agent_update).chunk(2, dim=-1)
+                z = torch.sigmoid(z)
+                agent_emb = (1-z) * agent_emb + z * agent_update
+            else:
+                agent_emb = agent_emb + self.agent_mlp(agent_update)
 
             # Readout
             if self.node_readout:
