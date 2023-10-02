@@ -14,6 +14,7 @@ def Q(values: torch.Tensor, rewards: torch.Tensor, not_done: torch.Tensor, gamma
 
 @torch.jit.script
 def Q_n(values: torch.Tensor, rewards: torch.Tensor, not_done: torch.Tensor, gamma: float, n: int = 1):
+    n = min(n, values.size(0))
     next_values = torch.cat([
         (values.detach() * not_done)[n:],
         torch.zeros([n]+list(values.shape[1:]), device=values.device)

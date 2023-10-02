@@ -16,7 +16,8 @@ class PG_Rollout(AlgBase):
     @staticmethod
     @torch.jit.script
     def loss(logits, actions, done, valid, costs, b_rollout, gamma: float = 0.99):
-        # logits: [L, Bs, Nn], values: [L, Bs], actions: [L, Bs], done: [L, Bs], valid: [L, Bs, Nn], rewards: [L, Bs]
+        # logits: [L, Bs, Nn], values: [L, Bs], actions: [L, Bs], done: [L, Bs], valid: [L, Bs, Nn], costs: [L, Bs]
+        b_rollout = b_rollout.expand(costs.shape[1]//b_rollout.shape[1], -1).reshape(1, -1)
         not_done = done.logical_not()  # [L, Bs]
         num_not_done = torch.count_nonzero(not_done) + 1e-5
         # num_valid = torch.count_nonzero(valid) + 1e-5
@@ -33,6 +34,6 @@ class PG_Rollout(AlgBase):
         # value_loss
         value_loss = torch.tensor(0, device=policy_loss.device)
         # entropy loss
-        entropy_loss = torch.tensor(0, device=policy_loss.device)
+        entropy_loss =  (log_probs * probs * valid).mean(dim=[0,1]).sum()
 
         return policy_loss, value_loss, entropy_loss

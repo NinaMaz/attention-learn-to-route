@@ -40,6 +40,6 @@ class AC(AlgBase):
         # critic loss
         value_loss = advantage.pow(2).mean(1).sum()
         # entropy loss
-        entropy_loss = (log_probs * probs * valid).mean(1).sum()
+        entropy_loss = (log_probs * probs * valid).mean(dim=[0,1]).sum()
 
         return policy_loss, value_loss, entropy_loss

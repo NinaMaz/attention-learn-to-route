@@ -198,3 +198,33 @@ class StateCVRP(NamedTuple):
 
     def construct_solutions(self, actions):
         return actions
+
+    def duplicate(self, n):
+        # return StateCVRP(
+        #     self.coords,  # Depot + loc
+        #     self.demand,
+        #     self.ids,
+        #     # State
+        #     self.prev_a,
+        #     self.used_capacity,
+        #     self.visited_,
+        #     self.lengths,
+        #     self.last_length,
+        #     self.cur_coord,
+        #     self.i,
+        #     self.done
+        # )
+        return StateCVRP(
+            self.coords.expand(n, *self.coords.shape).flatten(0,1),  # Depot + loc
+            self.demand.expand(n, *self.demand.shape).flatten(0,1),
+            torch.arange(n * self.ids.shape[0], dtype=torch.int64, device=self.ids.device)[:, None],
+            # State
+            self.prev_a.expand(n, *self.prev_a.shape).flatten(0,1),
+            self.used_capacity.expand(n, *self.used_capacity.shape).flatten(0,1),
+            self.visited_.expand(n, *self.visited_.shape).flatten(0,1),
+            self.lengths.expand(n, *self.lengths.shape).flatten(0,1),
+            self.last_length.expand(n, *self.last_length.shape).flatten(0,1),
+            self.cur_coord.expand(n, *self.cur_coord.shape).flatten(0,1),
+            self.i,
+            self.done.expand(n, *self.done.shape).flatten(0,1)
+        )

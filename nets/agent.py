@@ -220,8 +220,24 @@ class Agent(torch.nn.Module):
         obs = {"coords": state.coords, "demands": state.demand,
                "current": state.get_current_node(), "used_capacity": state.get_used_capacity()}
 
+        if self.node_features_option == "once":
+            node_features = self.emb_fn(obs["coords"], obs["demands"])  # [batch_size, graph_size+1, dim]
+            mem_node_features, node_features, graph_feature = self.enc(
+                node_features, None, start_pos=obs["current"])  # [batch_size, graph_size, hidden_dim], [batch_size, hidden_dim]
+            obs["node_features"] = node_features
+            obs["graph_feature"] = graph_feature
+            obs["mem_node_features"] = mem_node_features.detach()
+
+        if self.training and isinstance(self.enc, AgentGNN):
+            num_iters = (self.enc.num_steps + self.enc.bptt_steps - 1) // self.enc.bptt_steps
+            state = state.duplicate(num_iters)
+            obs.update({"current": state.get_current_node(), "used_capacity": state.get_used_capacity()})
+
         step = 0
         while not state.all_finished():
+            # if update_steps is not None and alg is not None and step > 0 and step % update_steps == 0:
+            #     alg.update(traj, write_logs=False)
+            #     traj = Trajectory()
             step += 1
             mask = state.get_mask()
             done = state.get_finished()
@@ -240,9 +256,6 @@ class Agent(torch.nn.Module):
                 traj.append("actions", action)
                 traj.append("valid", mask.logical_not())
                 traj.append("done", done)
-                if update_steps is not None and alg is not None and step % update_steps == 0:
-                    alg.update(traj)
-                    traj = Trajectory()
 
             obs.update({"current": state.get_current_node(), "used_capacity": state.get_used_capacity()})
 
