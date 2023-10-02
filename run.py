@@ -38,8 +38,14 @@ __spec__ = None  # for tracing with pdb
 def run(opts):
     run_name = f'{opts["problem"]}{opts["graph_size"]}_{opts["alg"]["type"]}_' \
                f'{opts["agent"]["encoder"]["cls"]}_{time.strftime("%Y-%m-%d-%H:%M:%S")}'
-    opts["save_dir"] = str(Path(opts["save_dir"]) / run_name)
     opts["run_name"] = run_name
+    if len(opts["save_dir"].split("/")) <= 1:
+        opts["save_dir"] = str(Path(opts["save_dir"]) / run_name)
+    os.makedirs(opts["save_dir"], exist_ok=True)
+    # Save arguments so exact configuration can always be found
+    with open(os.path.join(opts["save_dir"], "config.yaml"), "w") as f:
+        yaml.dump(opts, f)
+
     wandb.init(
         name=run_name,
         project="SbRLCO",
@@ -55,24 +61,8 @@ def run(opts):
     print(yaml.dump(opts))
     opts = wandb.config
 
-    # Set the random seed
-    # torch.manual_seed(opts.seed)
-
-    os.makedirs(opts.save_dir)
-    # Save arguments so exact configuration can always be found
-    with open(os.path.join(opts.save_dir, "args.json"), "w") as f:
-        json.dump(dict(opts), f, indent=True)
-
-
     # Figure out what's the problem
     problem = load_problem(opts.problem)
-
-    # Load data from load_path
-    load_data = {}
-    load_path = opts.get("load_path") or opts.get("resume")
-    if load_path is not None:
-        print("  [*] Loading data from {}".format(load_path))
-        load_data = torch_load_cpu(load_path)
 
     agent = Agent(encoder_cls=opts.agent["encoder"]["cls"],
                   encoder_params=opts.agent["encoder"]["args"],
@@ -81,15 +71,23 @@ def run(opts):
                   node_features_option=opts.agent["node_features_option"]).to(opts.device)
     print(torch.cuda.device_count())
 
-    optimizer = optim.Adam([
-        {"params": agent.enc.parameters(), "lr": opts.lr_encoder},
-        {"params": agent.actor.parameters(), "lr": opts.lr_actor},
-        {"params": agent.critic.parameters(), "lr": opts.lr_critic},
+    optimizer = optim.AdamW([
+        {"params": agent.enc.parameters(), "lr": opts.lr_encoder, "weight_decay": opts.weight_decay},
+        {"params": agent.actor.parameters(), "lr": opts.lr_actor, "weight_decay": opts.weight_decay},
+        {"params": agent.critic.parameters(), "lr": opts.lr_critic, "weight_decay": opts.weight_decay},
     ])
     # Initialize learning rate scheduler, decay by lr_decay once per epoch!
     lr_scheduler = optim.lr_scheduler.LambdaLR(
         optimizer, lambda epoch: opts.lr_decay**epoch
     )
+
+    # Load data from load_path
+    load_data = {}
+    load_path = opts.get("load_path") or opts.get("resume")
+    if load_path is not None:
+        print("  [*] Loading data from {}".format(load_path))
+        load_data = torch_load_cpu(os.path.join(opts.save_dir, load_path))
+        agent.load_state_dict(load_data["model"])
 
     baseline = NoBaseline()
 
@@ -127,6 +125,19 @@ def run(opts):
                 problem,
                 opts,
             )
+    else:
+        res = {}
+        res_path = os.path.join(opts.save_dir, f"val_reward.json")
+        for g_size in opts.eval_graph_sizes:
+            val_ds = problem.make_dataset(
+                size=g_size,
+                num_samples=opts.val_epoch_size,
+                filename=opts.val_dataset,
+                distribution=opts.data_distribution,
+            )
+            avg_reward = validate(agent, val_ds, opts, problem)
+            res[g_size] = avg_reward.item()
+            json.dump(res, open(res_path, "w"))
 
 
 if __name__ == "__main__":

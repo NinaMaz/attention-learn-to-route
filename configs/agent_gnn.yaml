@@ -7,9 +7,10 @@ device: cuda:0
 epoch_start: 0
 eval_only: false
 exp_beta: 0.8
+wandb_disabled: false
 
-batch_size: 50
-eval_batch_size: 50
+batch_size: 150
+eval_batch_size: 150
 graph_size: 100
 train_epoch_size: 50000
 val_epoch_size: 10000
@@ -31,7 +32,7 @@ alg:
     loss_weights:
       - 1.0
       - 0.0
-      - 0.0
+      - 0.1
     max_grad_norm: 1.0
     gamma: 1
 
@@ -44,8 +45,9 @@ agent:
       out_dim: 128
       dropout: 0.0
       num_agents: 25
-      num_steps: 20
+      num_steps: 8 #[8, 100]
       node_readout: true
+      bptt_steps: 8
   embedding_dim: 32
   hidden_dim: 128
   ff_hidden_dim: 256
@@ -57,13 +59,14 @@ agent:
 log_dir: logs
 log_step: 50
 
-lr_actor: 0.00001
-lr_critic: 0.00001
-lr_encoder: 0.00001
-lr_decay: 1.0
+lr_actor: 0.00005
+lr_critic: 0.00005
+lr_encoder: 0.00005
+lr_decay: 0.965
+weight_decay: 0.05
 no_progress_bar: false
 normalization: batch
-output_dir: outputs
+#output_dir: outputs
 problem: cvrp
 resume: null
 save_dir: outputs

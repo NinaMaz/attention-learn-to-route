@@ -23,18 +23,21 @@ alg:
     loss_weights:
       - 1.0
       - 1.0
-      - 0.1
+      - 0.001
     max_grad_norm: 1.0
     gamma: 0.95
 
 agent:
   encoder:
-    cls: GraphAttentionEncoderMask  # GraphAttentionEncoder, GraphAttentionEncoderMask, AgentGNN
+    cls: AgentGNN
     args:
-      n_heads: 8
-      embed_dim: 128
-      n_layers: 3
-      normalization: batch
+      input_dim: 32
+      hidden_dim: 32
+      out_dim: 128
+      dropout: 0.0
+      num_agents: 25
+      num_steps: 10
+      node_readout: true
   embedding_dim: 128
   hidden_dim: 128
   ff_hidden_dim: 512
