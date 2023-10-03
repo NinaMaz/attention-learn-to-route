@@ -103,14 +103,14 @@ def run(opts):
     wandb.log({"val_avg_reward": avg_reward}, step=0)
 
     if opts.alg["type"] == "ac":
-        alg = AC(agent, optimizer, **opts.alg["args"])
+        alg = AC(agent, optimizer, log_freq=opts.log_step, **opts.alg["args"])
     elif opts.alg["type"] == "pg_rollout":
         baseline = RolloutBaseline(agent, problem, opts)
-        alg = PG_Rollout(agent, optimizer, **opts.alg["args"])
-    elif opts.alg["type"] == "ppo":
-        alg = PPO(agent, optimizer, opts.loss_weights, opts.max_grad_norm,
-                        0.99, opts.symmetric_force, 0.1,
-                        opts.batch_size, 10, torch.ones(1, 1, dtype=torch.bool, device=opts.device))
+        alg = PG_Rollout(agent, optimizer, log_freq=opts.log_step, **opts.alg["args"])
+    # elif opts.alg["type"] == "ppo":
+    #     alg = PPO(agent, optimizer, opts.loss_weights, opts.max_grad_norm,
+    #                     0.99, opts.symmetric_force, 0.1,
+    #                     opts.batch_size, 10, torch.ones(1, 1, dtype=torch.bool, device=opts.device))
     else:
         raise NotImplementedError("Currently supported algorithms: 'ac', 'ppo'")
 

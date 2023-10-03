@@ -3,13 +3,13 @@ bl_warmup_epochs: 1
 checkpoint_encoder: false
 checkpoint_epochs: 1
 data_distribution: null
-device: cuda:1
+device: cuda:0
 epoch_start: 0
 eval_only: false
 exp_beta: 0.8
 
-batch_size: 50
-eval_batch_size: 50
+batch_size: 200
+eval_batch_size: 200
 graph_size: 100
 train_epoch_size: 50000
 val_epoch_size: 10000
@@ -43,15 +43,16 @@ agent:
   node_features_option: once # once, update, always
 
 log_dir: logs
-log_step: 50
+log_step: 100
 
 lr_actor: 0.00001
 lr_critic: 0.00001
 lr_encoder: 0.00001
-lr_decay: 1.0
+lr_decay: 0.965
+weight_decay: 0.05
 no_progress_bar: false
 normalization: batch
-output_dir: outputs
+#output_dir: outputs
 problem: cvrp
 resume: null
 save_dir: outputs

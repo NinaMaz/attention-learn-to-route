@@ -44,7 +44,7 @@ agent:
   node_features_option: always # once, update, always
 
 log_dir: logs
-log_step: 50
+log_step: 100
 
 lr_actor: 0.00001
 lr_critic: 0.00001

@@ -84,7 +84,7 @@ def train_epoch(
         training_dataset, batch_size=opts.batch_size, num_workers=opts.num_workers
     )
     alg.agent.train()
-    if isinstance(alg.agent.enc, AgentGNN) and hasattr(alg.agent.enc, "max_steps"):
+    if isinstance(alg.agent.enc, AgentGNN) and alg.agent.enc.min_steps != alg.agent.enc.max_steps:
         alg.agent.enc.num_steps = max(alg.agent.enc.min_steps,
                                       alg.agent.enc.max_steps * (epoch + 1) // opts.n_epochs)
 
@@ -102,7 +102,7 @@ def train_epoch(
         # assert cost.allclose(traj["costs"].sum(0))
         alg.update(traj)
         # print total gpu memory usage
-        if alg.step % 100 == 0:
+        if alg.step % opts.log_step == 0:
             wandb.log({"gpu_memory_allocated, GB": torch.cuda.memory_allocated(opts.device) / 1e9}, step=alg.step)
             wandb.log({"gpu_memory_reserved, GB": torch.cuda.memory_reserved(opts.device) / 1e9}, step=alg.step)
             wandb.log({"train_avg_cost": cost.mean()}, step=alg.step)

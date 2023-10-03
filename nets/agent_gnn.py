@@ -74,9 +74,13 @@ class AgentGNN(nn.Module):
 
         if isinstance(self.num_steps, (tuple, list)):
             self.min_steps, self.max_steps = self.num_steps
-            self.num_steps = self.max_steps
+            self.num_steps = self.min_steps
+        else:
+            self.min_steps, self.max_steps  = self.num_steps, self.num_steps
 
-        self.time_emb = TimeEmbedding(self.num_steps + 1, self.dim, self.dim * mlp_width_mult)
+        MAX_POSSIBLE_STEPS = 200
+        assert MAX_POSSIBLE_STEPS >= self.max_steps
+        self.time_emb = TimeEmbedding(MAX_POSSIBLE_STEPS + 1, self.dim, self.dim * mlp_width_mult)
         if input_dim != hidden_dim:
             self.input_proj = nn.Sequential(nn.Linear(input_dim, self.dim * 2), self.activation,
                                             nn.Linear(self.dim * 2, self.dim))
@@ -375,7 +379,7 @@ class AgentGNN(nn.Module):
             # Readout
             if self.node_readout:
                 layer_out = self.step_readout_mlp(node_emb + self.step_readout_mlp_time(time_emb))
-                final_node_emb += layer_out / (num_steps + 1)
+                final_node_emb += layer_out / num_steps
             else:
                 final_node_emb = node_emb
 

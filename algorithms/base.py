@@ -5,13 +5,14 @@ from utils import clip_grad_norms
 
 
 class AlgBase:
-    def __init__(self, agent, opt, loss_weights, max_grad_norm, gamma):
+    def __init__(self, agent, opt, loss_weights, max_grad_norm, gamma, log_freq=100):
         self.agent = agent
         self.opt = opt
         self.loss_weights = loss_weights
         self.max_grad_norm = max_grad_norm
         self.gamma = gamma
         self.step = 0
+        self.log_freq = log_freq
 
     def opt_step(self, losses):
         obj = sum(w * l for (w,l) in zip(self.loss_weights, losses))
@@ -21,8 +22,8 @@ class AlgBase:
         self.opt.step()
         self.opt.zero_grad()
 
-    def write_log(self, losses, trajectory, freq=100):
-        if self.step % freq == 0:
+    def write_log(self, losses, trajectory):
+        if self.step % self.log_freq == 0:
             losses = [x.detach() for x in losses]
             valid, logits = trajectory["valid"].detach(), trajectory["logits"].detach()
 
