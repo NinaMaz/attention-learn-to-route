@@ -51,6 +51,7 @@ class AgentGNN(nn.Module):
                  num_pos_attention_heads = 1,
                  bptt_steps = None,
                  gate = True,
+                 temp = 2.0/3.0
                  ):
         super().__init__()
 
@@ -65,9 +66,9 @@ class AgentGNN(nn.Module):
         self.num_pos_attention_heads = num_pos_attention_heads
         self.bptt_steps = bptt_steps if bptt_steps is not None else num_steps
         self.gate = gate
+        self.temp = temp
 
         self.activation = nn.LeakyReLU(negative_slope=0.01)
-        self.temp = 2.0 / 3.0
         extra_global_dim = self.dim
         mlp_width_mult = 2
         attn_width_mult = 1
@@ -77,6 +78,11 @@ class AgentGNN(nn.Module):
             self.num_steps = self.min_steps
         else:
             self.min_steps, self.max_steps  = self.num_steps, self.num_steps
+
+        if isinstance(self.temp, (tuple, list)):
+            self.min_temp, self.max_temp = self.temp
+        else:
+            self.min_temp, self.max_temp  = self.temp, self.temp
 
         MAX_POSSIBLE_STEPS = 200
         assert MAX_POSSIBLE_STEPS >= self.max_steps

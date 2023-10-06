@@ -84,9 +84,13 @@ def train_epoch(
         training_dataset, batch_size=opts.batch_size, num_workers=opts.num_workers
     )
     alg.agent.train()
-    if isinstance(alg.agent.enc, AgentGNN) and alg.agent.enc.min_steps != alg.agent.enc.max_steps:
-        alg.agent.enc.num_steps = max(alg.agent.enc.min_steps,
-                                      alg.agent.enc.max_steps * (epoch + 1) // opts.n_epochs)
+    if isinstance(alg.agent.enc, AgentGNN):
+        if alg.agent.enc.min_steps != alg.agent.enc.max_steps:
+            alg.agent.enc.num_steps = max(alg.agent.enc.min_steps,
+                                          alg.agent.enc.max_steps * (epoch + 1) // opts.n_epochs)
+        if alg.agent.enc.min_temp != alg.agent.enc.max_temp:
+            alg.agent.enc.temp = max(alg.agent.enc.min_temp,
+                                     alg.agent.enc.max_temp * (epoch / opts.n_epochs - 1) ** 2)
 
     for batch_id, batch in enumerate(
             tqdm(training_dataloader, disable=opts.no_progress_bar)
@@ -109,6 +113,7 @@ def train_epoch(
             wandb.log({"Example": opts.batch_size * alg.step}, step=alg.step)
             if isinstance(alg.agent.enc, AgentGNN):
                 wandb.log({"AgentGNN steps": alg.agent.enc.num_steps}, step=alg.step)
+                wandb.log({"AgentGNN gumbel temp": alg.agent.enc.temp}, step=alg.step)
 
     epoch_duration = time.time() - start_time
     print(
