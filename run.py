@@ -78,7 +78,7 @@ def run(opts):
     ])
     # Initialize learning rate scheduler, decay by lr_decay once per epoch!
     lr_scheduler = optim.lr_scheduler.LambdaLR(
-        optimizer, lambda epoch: opts.lr_decay**epoch
+        optimizer, lambda epoch: max(opts.lr_decay ** epoch, opts.lr_min_decay)
     )
 
     # Load data from load_path

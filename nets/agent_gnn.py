@@ -418,6 +418,7 @@ class AgentGNN(nn.Module):
 
                 attn_score = F.gumbel_softmax(attn_score, hard=True, dim=2,
                     tau=(self.temp if self.training else 1e-6))  # [batch_size, n_agents, n_nodes]
+                    # tau=self.temp)
 
                 # Get updated agent positions
                 agent_node_attn_value, agent_pos = torch.max(attn_score, dim=2, keepdim=True)  # [batch_size, n_agents, 1], [batch_size, n_agents, 1]
